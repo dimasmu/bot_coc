@@ -3,11 +3,11 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from adb_shell.adb_device import AdbDeviceTcp
 from adb_shell.auth.sign_pythonrsa import PythonRSASigner
 from adb_shell.auth.keygen import keygen
-from pathlib import Path
 
 from backend.adb.emulators import EmulatorAdapter, get_emulator_adapters
 from backend.config import settings
@@ -48,6 +48,14 @@ class AdbManager:
             pub = f.read()
         return PythonRSASigner(pub, priv)
 
+    async def _run_shell(self, cmd: str, decode: bool = True) -> str | bytes:
+        """Run a shell command on the device via the executor."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._device.shell(cmd, decode=decode),
+        )
+
     async def connect(
         self,
         host: str | None = None,
@@ -58,7 +66,7 @@ class AdbManager:
         Returns True if connected successfully.
         """
         async with self._lock:
-            await self.disconnect()
+            await self._disconnect()
 
             self._signer = self._ensure_keys()
 
@@ -83,7 +91,7 @@ class AdbManager:
                     self._device = device
                     self._adapter = adapter
 
-                    resolution = device.shell("wm size")
+                    resolution = await self._run_shell("wm size")
                     self.status = AdbStatus(
                         connected=True,
                         emulator_name=adapter.name,
@@ -95,13 +103,17 @@ class AdbManager:
 
                 except Exception as e:
                     logger.warning("Failed to connect to %s: %s", adapter.name, e)
+                    try:
+                        device.close()
+                    except Exception:
+                        pass
                     self._device = None
 
             self.status = AdbStatus()
             return False
 
-    async def disconnect(self) -> None:
-        """Close the ADB connection."""
+    async def _disconnect(self) -> None:
+        """Close the ADB connection (no lock -- for internal use)."""
         if self._device is not None:
             try:
                 self._device.close()
@@ -111,56 +123,65 @@ class AdbManager:
             self._adapter = None
             self.status = AdbStatus()
 
+    async def disconnect(self) -> None:
+        """Close the ADB connection."""
+        async with self._lock:
+            await self._disconnect()
+
     async def screencap(self) -> bytes | None:
         """Capture the device screen as PNG bytes.
 
         Returns None if the capture fails.
         """
-        if self._device is None:
-            return None
+        async with self._lock:
+            if self._device is None:
+                return None
 
-        loop = asyncio.get_running_loop()
-        try:
-            return await loop.run_in_executor(
-                None,
-                lambda: self._device.shell("screencap -p", decode=False),
-            )
-        except Exception as e:
-            logger.error("screencap failed: %s", e)
-            return None
+            loop = asyncio.get_running_loop()
+            try:
+                return await loop.run_in_executor(
+                    None,
+                    lambda: self._device.shell("screencap -p", decode=False),
+                )
+            except Exception as e:
+                logger.error("screencap failed: %s", e)
+                return None
 
     async def set_resolution(self) -> bool:
         """Enforce target resolution on the device."""
-        if self._device is None:
-            return False
-        try:
-            self._device.shell(f"wm size {settings.screen_width}x{settings.screen_height}")
-            self._device.shell(f"wm density {settings.screen_dpi}")
-            return True
-        except Exception as e:
-            logger.error("Failed to set resolution: %s", e)
-            return False
+        async with self._lock:
+            if self._device is None:
+                return False
+            try:
+                await self._run_shell(f"wm size {settings.screen_width}x{settings.screen_height}")
+                await self._run_shell(f"wm density {settings.screen_dpi}")
+                return True
+            except Exception as e:
+                logger.error("Failed to set resolution: %s", e)
+                return False
 
     async def tap(self, x: int, y: int) -> bool:
         """Tap at coordinates."""
-        if self._device is None:
-            return False
-        try:
-            self._device.shell(f"input tap {x} {y}")
-            return True
-        except Exception as e:
-            logger.error("tap failed: %s", e)
-            return False
+        async with self._lock:
+            if self._device is None:
+                return False
+            try:
+                await self._run_shell(f"input tap {x} {y}")
+                return True
+            except Exception as e:
+                logger.error("tap failed: %s", e)
+                return False
 
     async def health_check(self) -> bool:
         """Check if the ADB connection is still alive."""
-        if self._device is None:
-            return False
-        try:
-            self._device.shell("echo ok")
-            return True
-        except Exception:
-            return False
+        async with self._lock:
+            if self._device is None:
+                return False
+            try:
+                await self._run_shell("echo ok")
+                return True
+            except Exception:
+                return False
 
     @property
     def is_connected(self) -> bool:
