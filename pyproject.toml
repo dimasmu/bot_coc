@@ -1,0 +1,18 @@
+[project]
+name = "coc-autoweb"
+version = "0.1.0"
+description = "Clash of Clans Web-Based Automation Suite"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.115",
+    "adb-shell>=0.4",
+    "opencv-python-headless>=4.10",
+    "pytesseract>=0.3",
+    "sqlmodel>=0.0",
+    "aiosqlite>=0.20",
+    "pydantic-settings>=2.0",
+    "pillow>=11.0",
+]
+
+[project.scripts]
+coc-bot = "backend.main:main"

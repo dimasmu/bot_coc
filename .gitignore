@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+*.egg-info/
+dist/
+build/
+storage/coc_bot.db
+storage/templates/*.png
+node_modules/
+.superpowers/
