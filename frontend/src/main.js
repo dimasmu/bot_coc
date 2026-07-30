@@ -59,6 +59,14 @@ document.addEventListener("alpine:init", () => {
       this.loadFarmingConfig();
       this.loadAnalytics();
       this.connectLogs();
+      this.loadRois();
+
+      // Auto-capture screenshot when switching to calibrator tab
+      this.$watch('activeTab', (tab) => {
+        if (tab === 'calibrator' && this.adbStatus.connected) {
+          this.captureScreenshot();
+        }
+      });
     },
 
     startFpsCounter() {
@@ -81,6 +89,9 @@ document.addEventListener("alpine:init", () => {
         });
         const data = await res.json();
         this.adbStatus = data.status;
+        if (this.adbStatus.connected && this.activeTab === 'calibrator') {
+          this.captureScreenshot();
+        }
       } catch (e) {
         console.error("ADB connect failed:", e);
       } finally {
@@ -172,8 +183,9 @@ document.addEventListener("alpine:init", () => {
       ctx.drawImage(bitmap, 0, 0);
       bitmap.close();
 
+      await this.loadRois();
+      this.drawSavedRois();
       this.setupRoiDrag();
-      this.loadRois();
     },
 
     setupRoiDrag() {
@@ -273,6 +285,54 @@ document.addEventListener("alpine:init", () => {
     async deleteRoi(id) {
       await fetch(`/api/v1/roi/${id}`, { method: "DELETE" });
       this.loadRois();
+    },
+
+    selectRoi(roi) {
+      this.roiName = roi.roi_name;
+      this.roiCoords = `${roi.x_pos}, ${roi.y_pos}, ${roi.width}, ${roi.height}`;
+      this.roiActive = true;
+
+      const canvas = document.getElementById("calibratorCanvas");
+      const box = document.getElementById("roiBox");
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width / canvas.width;
+      const scaleY = rect.height / canvas.height;
+
+      box.style.display = "block";
+      box.style.left = (roi.x_pos * scaleX) + "px";
+      box.style.top = (roi.y_pos * scaleY) + "px";
+      box.style.width = (roi.width * scaleX) + "px";
+      box.style.height = (roi.height * scaleY) + "px";
+    },
+
+    drawSavedRois() {
+      const canvas = document.getElementById("calibratorCanvas");
+      const ctx = canvas.getContext("2d");
+      const colors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#ec4899', '#84cc16'];
+
+      this.savedRois.forEach((roi, i) => {
+        const color = colors[i % colors.length];
+
+        // Draw semi-transparent fill
+        ctx.fillStyle = color + '30';
+        ctx.fillRect(roi.x_pos, roi.y_pos, roi.width, roi.height);
+
+        // Draw border
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(roi.x_pos, roi.y_pos, roi.width, roi.height);
+
+        // Draw label background
+        const label = roi.roi_name;
+        ctx.font = '11px monospace';
+        const textWidth = ctx.measureText(label).width;
+        ctx.fillStyle = color;
+        ctx.fillRect(roi.x_pos, roi.y_pos - 18, textWidth + 8, 18);
+
+        // Draw label text
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, roi.x_pos + 4, roi.y_pos - 5);
+      });
     },
 
     async testOcr() {
@@ -415,10 +475,11 @@ document.addEventListener("alpine:init", () => {
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     },
 
-    // Tab watcher for analytics and logs
+    // Tab watcher for analytics, logs, and calibrator
     watchTab(tab) {
       if (tab === 'analytics') this.loadAnalytics();
       if (tab === 'logs') this.connectLogs();
+      if (tab === 'calibrator' && this.adbStatus.connected) this.captureScreenshot();
     },
   }));
 });
