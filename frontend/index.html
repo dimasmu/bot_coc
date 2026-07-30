@@ -254,6 +254,70 @@
         </div>
       </div>
     </div>
+    <!-- Tab: Sequences -->
+    <div x-show="activeTab === 'sequences'" class="flex gap-4">
+      <div class="w-48 flex-shrink-0">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-3">
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Sequences</h3>
+          <div class="space-y-1">
+            <template x-for="seq in sequences" :key="seq.id">
+              <div class="text-xs p-1.5 rounded cursor-pointer flex items-center justify-between"
+                :class="selectedSequence?.id === seq.id ? 'bg-blue-800 text-blue-200' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'">
+                <span @click="loadSequence(seq)" x-text="seq.name" class="font-medium flex-1"></span>
+                <button @click.stop="deleteSequence(seq.id)" class="text-red-500 hover:text-red-300 text-[10px]" title="Delete">&times;</button>
+              </div>
+            </template>
+          </div>
+          <button @click="newSequence()" class="w-full mt-2 bg-slate-700 hover:bg-slate-600 text-xs px-2 py-1 rounded transition-colors text-slate-300 border border-slate-600 border-dashed">
+            + New Sequence
+          </button>
+        </div>
+      </div>
+      <div class="flex-1" x-show="selectedSequence">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 mb-2">
+          <h3 class="text-sm font-medium" x-text="selectedSequence?.name"></h3>
+          <button @click="activateSequence(selectedSequence.id)" class="ml-2 text-[10px] px-2 py-0.5 rounded"
+            :class="selectedSequence?.is_active ? 'bg-green-800 text-green-300' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'"
+            x-text="selectedSequence?.is_active ? 'Active' : 'Activate'"></button>
+          <p class="text-xs text-slate-400" x-text="selectedSequence?.description"></p>
+        </div>
+        <div class="space-y-1 mb-3" id="stepList">
+          <template x-for="(step, idx) in selectedSequence?.steps || []" :key="idx">
+            <div class="flex items-center gap-2 bg-slate-800 rounded border border-slate-700 p-2 text-xs"
+              :class="step.step_type === 'search' ? 'border-yellow-700' : step.step_type === 'attack' ? 'border-red-700' : ''">
+              <span class="text-slate-500 w-6" x-text="idx+1"></span>
+              <span class="w-16 font-mono"
+                :class="step.step_type === 'tap' ? 'text-green-400' : step.step_type === 'search' ? 'text-yellow-400' : step.step_type === 'attack' ? 'text-red-400' : 'text-blue-400'"
+                x-text="step.step_type"></span>
+              <span class="text-slate-400" x-text="step.roi_name || (step.duration ? step.duration+'s' : '')"></span>
+              <div class="ml-auto flex gap-1">
+                <button @click="moveStep(idx, -1)" :disabled="idx===0" class="text-slate-500 hover:text-slate-300 disabled:opacity-30">&uarr;</button>
+                <button @click="moveStep(idx, 1)" :disabled="idx===selectedSequence.steps.length-1" class="text-slate-500 hover:text-slate-300 disabled:opacity-30">&darr;</button>
+                <button @click="removeStep(idx)" class="text-red-500 hover:text-red-300">&times;</button>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="flex gap-2">
+          <select x-model="newStepType" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs">
+            <option value="tap">Tap</option>
+            <option value="wait">Wait</option>
+            <option value="search">Search</option>
+            <option value="attack">Attack</option>
+            <option value="return_home">Return Home</option>
+          </select>
+          <select x-model="newStepRoi" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs w-44" x-show="newStepType==='tap'">
+            <option value="">-- Select ROI --</option>
+            <template x-for="roi in savedRois" :key="roi.id">
+              <option :value="roi.roi_name" x-text="roi.roi_name + (roi.roi_type === 'read' ? ' [read]' : ' [tap]')"></option>
+            </template>
+          </select>
+          <input x-model="newStepDuration" placeholder="Seconds (wait)" type="number" step="0.5" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs w-20" x-show="newStepType==='wait'">
+          <button @click="addStep()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs">Add Step</button>
+          <button @click="saveSequence()" class="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-xs ml-auto">Save</button>
+        </div>
+      </div>
+    </div>
     <!-- Tab 4: Builder -->
     <div x-show="activeTab === 'builder'" class="max-w-md">
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-4">

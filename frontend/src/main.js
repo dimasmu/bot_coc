@@ -8,6 +8,7 @@ document.addEventListener("alpine:init", () => {
       { id: "dashboard", label: "Dashboard" },
       { id: "calibrator", label: "Calibrator" },
       { id: "farming", label: "Farming" },
+      { id: "sequences", label: "Sequences" },
       { id: "builder", label: "Builder" },
       { id: "analytics", label: "Analytics" },
       { id: "logs", label: "Logs" },
@@ -63,6 +64,13 @@ document.addEventListener("alpine:init", () => {
     logFilter: "INFO",
     wsLogs: null,
 
+    // Sequences
+    sequences: [],
+    selectedSequence: null,
+    newStepType: "tap",
+    newStepRoi: "",
+    newStepDuration: "",
+
     // Farming config
     farmingConfig: {
       min_gold: 300000,
@@ -79,6 +87,7 @@ document.addEventListener("alpine:init", () => {
       this.connectLogs();
       this.loadRois();
       this.connectBotStatus();
+      this.loadSequences();
 
       // Auto-capture screenshot when switching to calibrator tab
       this.$watch('activeTab', (tab) => {
@@ -214,6 +223,9 @@ document.addEventListener("alpine:init", () => {
     },
 
     async captureScreenshot() {
+      // Clean up old event listeners before re-adding
+      this._cleanupCalibratorListeners();
+
       const res = await fetch("/api/v1/screenshot");
       const data = await res.json();
       if (!data.png_base64) return;
@@ -286,10 +298,13 @@ document.addEventListener("alpine:init", () => {
         box.style.height = (h * scaleY) + "px";
       };
 
-      const onUp = () => {
+      const onUp = (e) => {
         if (!dragging) return;
         dragging = false;
-        const pos = getPos({ clientX: window._lastMouseX || startX, clientY: window._lastMouseY || startY });
+        // Use actual mouse event if available (mouseup), fallback to last known position (mouseleave)
+        const useX = e && e.clientX !== undefined ? e.clientX : (window._lastMouseX || startX);
+        const useY = e && e.clientY !== undefined ? e.clientY : (window._lastMouseY || startY);
+        const pos = getPos({ clientX: useX, clientY: useY });
         const x = Math.min(this.roiStartX, pos.x || this.roiStartX);
         const y = Math.min(this.roiStartY, pos.y || this.roiStartY);
         const w = Math.abs((pos.x || this.roiStartX) - this.roiStartX);
@@ -446,7 +461,7 @@ document.addEventListener("alpine:init", () => {
       } else {
         this.roiName = name;
         const defaults = {
-          'btn_attack':        { x: 7, y: 565, w: 176, h: 148, t: 'tap' },
+          'btn_attack':        { x: 5, y: 560, w: 60, h: 130, t: 'tap' },
           'btn_find_match':    { x: 569, y: 444, w: 286, h: 93, t: 'tap' },
           'btn_next':          { x: 1069, y: 437, w: 203, h: 102, t: 'tap' },
           'gold_number':       { x: 22, y: 93, w: 150, h: 43, t: 'read' },
@@ -480,8 +495,19 @@ document.addEventListener("alpine:init", () => {
       this.roiType = step.type;
     },
 
+    _cleanupCalibratorListeners() {
+      const canvas = document.getElementById("calibratorCanvas");
+      if (!canvas) return;
+      // Replace canvas element to remove all attached listeners
+      const newCanvas = canvas.cloneNode(true);
+      canvas.parentNode.replaceChild(newCanvas, canvas);
+    },
+
     setupClickCalibrate() {
       const canvas = document.getElementById("calibratorCanvas");
+      if (!canvas || canvas._clickCalibrateSet) return;
+      canvas._clickCalibrateSet = true;
+
       canvas.addEventListener('mouseup', (e) => {
         if (!this._isDragging) {
           this.oneClickCalibrate(e);
@@ -598,6 +624,95 @@ document.addEventListener("alpine:init", () => {
 
     clearLogs() {
       this.logLines = [];
+    },
+
+    async loadSequences() {
+      const res = await fetch("/api/v1/sequences");
+      this.sequences = await res.json();
+      if (this.sequences.length > 0) {
+        this.selectedSequence = this.sequences[0];
+        this.selectedSequence.steps = this.selectedSequence.steps || [];
+      }
+    },
+
+    loadSequence(seq) {
+      this.selectedSequence = seq;
+      // Load full sequence with steps
+      fetch(`/api/v1/sequences`).then(r => r.json()).then(seqs => {
+        const full = seqs.find(s => s.id === seq.id);
+        if (full) this.selectedSequence = full;
+      });
+    },
+
+    addStep() {
+      if (!this.selectedSequence) return;
+      const step = {
+        step_order: this.selectedSequence.steps.length,
+        step_type: this.newStepType,
+        roi_name: this.newStepType === 'tap' ? this.newStepRoi : null,
+        duration: this.newStepType === 'wait' ? parseFloat(this.newStepDuration) || 1 : null,
+        config_json: null,
+      };
+      this.selectedSequence.steps.push(step);
+      this.newStepRoi = "";
+      this.newStepDuration = "";
+    },
+
+    removeStep(idx) {
+      this.selectedSequence.steps.splice(idx, 1);
+    },
+
+    moveStep(idx, dir) {
+      const steps = this.selectedSequence.steps;
+      const newIdx = idx + dir;
+      if (newIdx < 0 || newIdx >= steps.length) return;
+      [steps[idx], steps[newIdx]] = [steps[newIdx], steps[idx]];
+    },
+
+    async saveSequence() {
+      if (!this.selectedSequence) return;
+      const steps = this.selectedSequence.steps.map((s, i) => ({
+        step_order: i,
+        step_type: s.step_type,
+        roi_name: s.roi_name || null,
+        duration: s.duration || null,
+        config_json: s.config_json || null,
+      }));
+      await fetch(`/api/v1/sequences/${this.selectedSequence.id}/steps`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(steps),
+      });
+      this.loadSequences();
+    },
+
+    async newSequence() {
+      const name = prompt("Sequence name:", "My Sequence");
+      if (!name) return;
+      const res = await fetch("/api/v1/sequences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description: "" }),
+      });
+      if (res.ok) {
+        await this.loadSequences();
+        this.selectedSequence = this.sequences[this.sequences.length - 1];
+        if (this.selectedSequence) this.selectedSequence.steps = [];
+      } else if (res.status === 409) {
+        alert("Sequence name already exists");
+      }
+    },
+
+    async deleteSequence(id) {
+      if (!confirm("Delete this sequence?")) return;
+      await fetch(`/api/v1/sequences/${id}`, { method: "DELETE" });
+      this.loadSequences();
+      this.selectedSequence = null;
+    },
+
+    async activateSequence(id) {
+      await fetch(`/api/v1/sequences/${id}/activate`, { method: "PUT" });
+      this.loadSequences();
     },
 
     formatNumber(n) {
