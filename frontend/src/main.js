@@ -26,6 +26,11 @@ document.addEventListener("alpine:init", () => {
     _frameCount: 0,
     _fpsInterval: null,
 
+    // Bot state
+    botState: "STOPPED",
+    botRunning: false,
+    wsBotStatus: null,
+
     // Calibrator state
     roiName: "",
     roiType: "tap",
@@ -35,6 +40,18 @@ document.addEventListener("alpine:init", () => {
     roiCoords: "0, 0, 0, 0",
     savedRois: [],
     ocrResult: "",
+    wizardMode: false,
+    wizardStep: 0,
+    wizardSequence: [
+      { name: "btn_attack", label: "Tap the ATTACK button", type: "tap" },
+      { name: "btn_find_match", label: "Tap FIND A MATCH button", type: "tap" },
+      { name: "btn_next", label: "Tap the NEXT button", type: "tap" },
+      { name: "gold_number", label: "Click on the GOLD number", type: "read" },
+      { name: "elixir_number", label: "Click on the ELIXIR number", type: "read" },
+      { name: "de_number", label: "Click on the DARK ELIXIR number", type: "read" },
+      { name: "btn_return_home", label: "Tap RETURN HOME button", type: "tap" },
+      { name: "btn_surrender", label: "Tap SURRENDER button", type: "tap" },
+    ],
 
     // Analytics
     stats: { total_gold: 0, total_elixir: 0, total_de: 0, total_raids: 0 },
@@ -61,6 +78,7 @@ document.addEventListener("alpine:init", () => {
       this.loadAnalytics();
       this.connectLogs();
       this.loadRois();
+      this.connectBotStatus();
 
       // Auto-capture screenshot when switching to calibrator tab
       this.$watch('activeTab', (tab) => {
@@ -103,6 +121,33 @@ document.addEventListener("alpine:init", () => {
     async disconnectAdb() {
       await fetch("/api/v1/adb/disconnect", { method: "POST" });
       this.adbStatus = { connected: false, emulatorName: "", serial: "", screenSize: "" };
+    },
+
+    async startBot() {
+      const res = await fetch("/api/v1/bot/start", { method: "POST" });
+      const data = await res.json();
+      this.botState = data.state;
+      this.botRunning = data.running;
+    },
+
+    async stopBot() {
+      const res = await fetch("/api/v1/bot/stop", { method: "POST" });
+      const data = await res.json();
+      this.botState = data.state;
+      this.botRunning = data.running;
+    },
+
+    connectBotStatus() {
+      if (this.wsBotStatus) return;
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/ws/status`);
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        this.botState = data.state;
+        this.botRunning = data.running;
+      };
+      ws.onclose = () => { this.wsBotStatus = null; };
+      this.wsBotStatus = ws;
     },
 
     startStream() {
@@ -187,6 +232,7 @@ document.addEventListener("alpine:init", () => {
       await this.loadRois();
       this.drawSavedRois();
       this.setupRoiDrag();
+      this.setupClickCalibrate();
     },
 
     setupRoiDrag() {
@@ -210,6 +256,7 @@ document.addEventListener("alpine:init", () => {
 
       const onDown = (e) => {
         e.preventDefault();
+        this._isDragging = false;
         dragging = true;
         const pos = getPos(e);
         startX = pos.x;
@@ -222,6 +269,7 @@ document.addEventListener("alpine:init", () => {
 
       const onMove = (e) => {
         if (!dragging) return;
+        this._isDragging = true;
         const pos = getPos(e);
         const x = Math.min(startX, pos.x);
         const y = Math.min(startY, pos.y);
@@ -276,6 +324,16 @@ document.addEventListener("alpine:init", () => {
       });
       this.roiName = "";
       this.loadRois();
+      if (this.wizardMode && this.wizardStep > 0) {
+        this.wizardStep++;
+        if (this.wizardStep > this.wizardSequence.length) {
+          this.wizardMode = false;
+          this.wizardStep = 0;
+          alert('Wizard complete! All 8 ROIs saved.');
+        } else {
+          this.wizardAutoAdvance();
+        }
+      }
     },
 
     async loadRois() {
@@ -352,6 +410,84 @@ document.addEventListener("alpine:init", () => {
       this.roiActive = false;
       this.roiCoords = "0, 0, 0, 0";
       document.getElementById("roiBox").style.display = "none";
+    },
+
+    async oneClickCalibrate(e) {
+      const canvas = document.getElementById("calibratorCanvas");
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
+
+      const isRead = this.roiType === "read";
+      const boxW = isRead ? 120 : 100;
+      const boxH = isRead ? 45 : 70;
+      const halfW = Math.round(boxW / 2);
+      const halfH = Math.round(boxH / 2);
+
+      this.roiCoords = `${Math.max(0, x - halfW)}, ${Math.max(0, y - halfH)}, ${boxW}, ${boxH}`;
+      this.roiActive = true;
+
+      const box = document.getElementById("roiBox");
+      const sX = rect.width / canvas.width;
+      const sY = rect.height / canvas.height;
+      box.style.display = "block";
+      box.style.left = `${Math.max(0, (x - halfW) * sX)}px`;
+      box.style.top = `${Math.max(0, (y - halfH) * sY)}px`;
+      box.style.width = `${boxW * sX}px`;
+      box.style.height = `${boxH * sY}px`;
+    },
+
+    loadPreset(name) {
+      const roi = this.savedRois.find(r => r.roi_name === name);
+      if (roi) {
+        this.selectRoi(roi);
+      } else {
+        this.roiName = name;
+        const defaults = {
+          'btn_attack':        { x: 7, y: 565, w: 176, h: 148, t: 'tap' },
+          'btn_find_match':    { x: 569, y: 444, w: 286, h: 93, t: 'tap' },
+          'btn_next':          { x: 1069, y: 437, w: 203, h: 102, t: 'tap' },
+          'gold_number':       { x: 22, y: 93, w: 150, h: 43, t: 'read' },
+          'elixir_number':     { x: 22, y: 128, w: 150, h: 45, t: 'read' },
+          'de_number':         { x: 22, y: 164, w: 150, h: 43, t: 'read' },
+          'btn_return_home':   { x: 50, y: 580, w: 160, h: 100, t: 'tap' },
+          'btn_surrender':     { x: 80, y: 660, w: 100, h: 50, t: 'tap' },
+        };
+        const d = defaults[name];
+        if (d) {
+          this.roiType = d.t;
+          this.roiCoords = `${d.x}, ${d.y}, ${d.w}, ${d.h}`;
+          this.roiActive = true;
+        }
+      }
+    },
+
+    onWizardToggle() {
+      if (this.wizardMode) {
+        this.wizardStep = 1;
+        this.wizardAutoAdvance();
+      } else {
+        this.wizardStep = 0;
+      }
+    },
+
+    wizardAutoAdvance() {
+      if (!this.wizardMode || this.wizardStep < 1 || this.wizardStep > this.wizardSequence.length) return;
+      const step = this.wizardSequence[this.wizardStep - 1];
+      this.roiName = step.name;
+      this.roiType = step.type;
+    },
+
+    setupClickCalibrate() {
+      const canvas = document.getElementById("calibratorCanvas");
+      canvas.addEventListener('mouseup', (e) => {
+        if (!this._isDragging) {
+          this.oneClickCalibrate(e);
+        }
+        this._isDragging = false;
+      });
     },
 
     async loadFarmingConfig() {
