@@ -1,6 +1,7 @@
 """SQLite database engine and session management."""
 
 from sqlmodel import create_engine, SQLModel, Session
+from sqlalchemy import text
 from backend.config import settings
 
 engine = create_engine(
@@ -12,6 +13,14 @@ engine = create_engine(
 
 def init_db():
     """Create all tables if they don't exist."""
+    # Add roi_type column if it doesn't exist (migration for existing DB)
+    try:
+        with Session(engine) as session:
+            session.exec(text("ALTER TABLE roi_templates ADD COLUMN roi_type VARCHAR(10) DEFAULT 'tap'"))
+            session.commit()
+    except Exception:
+        pass  # Column already exists
+
     SQLModel.metadata.create_all(engine)
 
     from backend.db.models import Config

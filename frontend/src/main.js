@@ -28,6 +28,7 @@ document.addEventListener("alpine:init", () => {
 
     // Calibrator state
     roiName: "",
+    roiType: "tap",
     roiActive: false,
     roiStartX: 0,
     roiStartY: 0,
@@ -271,7 +272,7 @@ document.addEventListener("alpine:init", () => {
       await fetch("/api/v1/roi", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roi_name: this.roiName, x_pos: x, y_pos: y, width: w, height: h }),
+        body: JSON.stringify({ roi_name: this.roiName, roi_type: this.roiType, x_pos: x, y_pos: y, width: w, height: h }),
       });
       this.roiName = "";
       this.loadRois();
@@ -289,6 +290,7 @@ document.addEventListener("alpine:init", () => {
 
     selectRoi(roi) {
       this.roiName = roi.roi_name;
+      this.roiType = roi.roi_type || "tap";
       this.roiCoords = `${roi.x_pos}, ${roi.y_pos}, ${roi.width}, ${roi.height}`;
       this.roiActive = true;
 
@@ -307,31 +309,31 @@ document.addEventListener("alpine:init", () => {
 
     drawSavedRois() {
       const canvas = document.getElementById("calibratorCanvas");
+      if (!canvas) return;
       const ctx = canvas.getContext("2d");
-      const colors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#ec4899', '#84cc16'];
 
-      this.savedRois.forEach((roi, i) => {
-        const color = colors[i % colors.length];
+      this.savedRois.forEach((roi) => {
+        const isTap = roi.roi_type === "tap";
+        const color = isTap ? "#22c55e" : "#a855f7";
 
-        // Draw semi-transparent fill
-        ctx.fillStyle = color + '30';
-        ctx.fillRect(roi.x_pos, roi.y_pos, roi.width, roi.height);
-
-        // Draw border
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
+        ctx.setLineDash(isTap ? [] : [4, 4]);
         ctx.strokeRect(roi.x_pos, roi.y_pos, roi.width, roi.height);
+        ctx.setLineDash([]);
 
-        // Draw label background
-        const label = roi.roi_name;
-        ctx.font = '11px monospace';
+        // Semi-transparent fill
+        ctx.fillStyle = color + "20";
+        ctx.fillRect(roi.x_pos, roi.y_pos, roi.width, roi.height);
+
+        // Label
+        const label = (isTap ? "T: " : "R: ") + roi.roi_name;
         const textWidth = ctx.measureText(label).width;
-        ctx.fillStyle = color;
-        ctx.fillRect(roi.x_pos, roi.y_pos - 18, textWidth + 8, 18);
-
-        // Draw label text
-        ctx.fillStyle = '#fff';
-        ctx.fillText(label, roi.x_pos + 4, roi.y_pos - 5);
+        ctx.fillStyle = color + "CC";
+        ctx.fillRect(roi.x_pos, roi.y_pos - 18, textWidth + 10, 18);
+        ctx.fillStyle = "#fff";
+        ctx.font = "11px monospace";
+        ctx.fillText(label, roi.x_pos + 5, roi.y_pos - 5);
       });
     },
 

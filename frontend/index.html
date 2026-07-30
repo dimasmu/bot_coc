@@ -137,9 +137,20 @@
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Saved ROIs</h3>
           <input x-model="roiName" placeholder="ROI name (e.g. btn_attack)"
             class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm w-full mb-2 font-mono" />
+          <div class="flex gap-2 mb-2">
+            <label class="flex items-center gap-1 text-xs cursor-pointer">
+              <input type="radio" x-model="roiType" value="tap" />
+              <span class="text-green-400">Tap</span>
+            </label>
+            <label class="flex items-center gap-1 text-xs cursor-pointer">
+              <input type="radio" x-model="roiType" value="read" />
+              <span class="text-purple-400">Read</span>
+            </label>
+          </div>
           <div class="space-y-1 max-h-80 overflow-y-auto" id="roiList">
             <template x-for="roi in savedRois" :key="roi.id">
               <div class="flex items-center justify-between text-xs bg-slate-700 rounded p-1.5 cursor-pointer hover:bg-slate-600 transition-colors">
+                <span :class="roi.roi_type === 'read' ? 'text-purple-400 bg-purple-900/30' : 'text-green-400 bg-green-900/30'" class="text-[10px] px-1 rounded mr-1 font-bold" x-text="roi.roi_type === 'read' ? 'R' : 'T'"></span>
                 <span @click="selectRoi(roi)" x-text="roi.roi_name" class="text-blue-300 font-mono flex-1 cursor-pointer"></span>
                 <button @click="deleteRoi(roi.id)" class="text-red-400 hover:text-red-300 ml-2">&times;</button>
               </div>
