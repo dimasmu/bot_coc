@@ -55,12 +55,16 @@ from backend.api.ws_screen import router as screen_router
 from backend.api.rest_adb import router as adb_router
 from backend.api.rest_roi import router as roi_router
 from backend.api.rest_config import router as config_router
+from backend.api.rest_analytics import router as analytics_router
+from backend.api.ws_logs import router as logs_router
 
 app.include_router(screen_router)
 app.include_router(adb_router)
 app.include_router(roi_router)
 app.include_router(status_router)
 app.include_router(config_router)
+app.include_router(analytics_router)
+app.include_router(logs_router)
 
 
 @app.get("/api/v1/health")
@@ -89,6 +93,32 @@ async def bot_stop():
 async def bot_status():
     """Get current FSM state and stats."""
     return fsm_controller.get_status_dict()
+
+
+@app.get("/api/v1/system/backup")
+async def system_backup():
+    """Download a zip backup of database and templates."""
+    import io
+    import zipfile
+    from pathlib import Path
+    from fastapi.responses import StreamingResponse
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        db_path = Path(settings.db_path)
+        if db_path.exists():
+            zf.write(db_path, "coc_bot.db")
+        template_dir = Path(settings.template_dir)
+        if template_dir.exists():
+            for f in template_dir.glob("*.png"):
+                zf.write(f, f"templates/{f.name}")
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=coc-backup.zip"},
+    )
 
 
 # In production, serve the built frontend

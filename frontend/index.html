@@ -196,14 +196,111 @@
         </div>
       </div>
     </div>
-    <div x-show="activeTab === 'builder'" class="flex items-center justify-center h-64">
-      <p class="text-slate-500 text-lg">Builder -- Coming Soon</p>
+    <!-- Tab 4: Builder -->
+    <div x-show="activeTab === 'builder'" class="max-w-md">
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-4">
+        <h3 class="text-sm uppercase tracking-wider text-slate-400 mb-3">Builder Status</h3>
+        <div class="flex items-center gap-3 mb-3">
+          <span class="text-2xl font-bold text-yellow-400">5</span>
+          <span class="text-sm text-slate-400">Total Builders</span>
+        </div>
+        <div class="space-y-1 text-sm">
+          <div class="flex justify-between"><span>Active</span><span class="text-green-400">0</span></div>
+          <div class="flex justify-between"><span>Idle</span><span class="text-slate-400">5</span></div>
+        </div>
+      </div>
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+        <h3 class="text-sm uppercase tracking-wider text-slate-400 mb-3">Upgrade Queue</h3>
+        <p class="text-slate-500 text-sm">No upgrades queued. Configure priority list for auto-upgrade.</p>
+      </div>
     </div>
-    <div x-show="activeTab === 'analytics'" class="flex items-center justify-center h-64">
-      <p class="text-slate-500 text-lg">Analytics -- Coming Soon</p>
+    <!-- Tab 5: Analytics -->
+    <div x-show="activeTab === 'analytics'">
+      <div class="grid grid-cols-4 gap-3 mb-4">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+          <div class="text-2xl font-bold text-yellow-400" x-text="formatNumber(stats.total_gold)">0</div>
+          <div class="text-xs text-slate-400 mt-1">Total Gold</div>
+        </div>
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+          <div class="text-2xl font-bold text-pink-400" x-text="formatNumber(stats.total_elixir)">0</div>
+          <div class="text-xs text-slate-400 mt-1">Total Elixir</div>
+        </div>
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+          <div class="text-2xl font-bold text-purple-400" x-text="formatNumber(stats.total_de)">0</div>
+          <div class="text-xs text-slate-400 mt-1">Total Dark E.</div>
+        </div>
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+          <div class="text-2xl font-bold text-blue-400" x-text="stats.total_raids">0</div>
+          <div class="text-xs text-slate-400 mt-1">Total Raids</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-3">Loot Per Hour</h3>
+          <div style="height:250px"><canvas id="lootChart"></canvas></div>
+        </div>
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-3">Search Efficiency</h3>
+          <div class="text-center py-8">
+            <div class="text-3xl font-bold text-slate-300" x-text="searchEfficiency.avg_skips">--</div>
+            <div class="text-xs text-slate-400 mt-1">Avg Skips Per Raid</div>
+            <div class="flex justify-center gap-8 mt-4 text-sm">
+              <div><span class="text-slate-400">Min: </span><span x-text="searchEfficiency.min_skips">--</span></div>
+              <div><span class="text-slate-400">Max: </span><span x-text="searchEfficiency.max_skips">--</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 mt-4">
+        <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-3">Recent Attacks</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-slate-400 text-xs">
+                <th class="p-2">Time</th>
+                <th class="p-2">Gold</th>
+                <th class="p-2">Elixir</th>
+                <th class="p-2">Dark E.</th>
+                <th class="p-2">Trophies</th>
+                <th class="p-2">Searches</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="log in attackHistory" :key="log.id">
+                <tr class="border-t border-slate-700 hover:bg-slate-750">
+                  <td class="p-2" x-text="formatTime(log.timestamp)"></td>
+                  <td class="p-2 text-yellow-400" x-text="formatNumber(log.gold_earned)"></td>
+                  <td class="p-2 text-pink-400" x-text="formatNumber(log.elixir_earned)"></td>
+                  <td class="p-2 text-purple-400" x-text="formatNumber(log.dark_elixir_earned)"></td>
+                  <td class="p-2" x-text="log.trophies_change"></td>
+                  <td class="p-2" x-text="log.search_count"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <p x-show="attackHistory.length === 0" class="text-slate-500 text-sm p-4">No attacks recorded yet</p>
+        </div>
+      </div>
     </div>
-    <div x-show="activeTab === 'logs'" class="flex items-center justify-center h-64">
-      <p class="text-slate-500 text-lg">Logs -- Coming Soon</p>
+    <!-- Tab 6: Logs -->
+    <div x-show="activeTab === 'logs'">
+      <div class="flex gap-2 mb-3">
+        <button @click="logFilter = 'DEBUG'" :class="logFilter === 'DEBUG' ? 'bg-slate-600' : 'bg-slate-800'" class="px-3 py-1 rounded text-xs transition-colors border border-slate-700">DEBUG</button>
+        <button @click="logFilter = 'INFO'" :class="logFilter === 'INFO' ? 'bg-blue-600' : 'bg-slate-800'" class="px-3 py-1 rounded text-xs transition-colors border border-slate-700">INFO</button>
+        <button @click="logFilter = 'WARNING'" :class="logFilter === 'WARNING' ? 'bg-yellow-600' : 'bg-slate-800'" class="px-3 py-1 rounded text-xs transition-colors border border-slate-700">WARNING</button>
+        <button @click="logFilter = 'ERROR'" :class="logFilter === 'ERROR' ? 'bg-red-600' : 'bg-slate-800'" class="px-3 py-1 rounded text-xs transition-colors border border-slate-700">ERROR</button>
+        <button @click="clearLogs()" class="ml-auto bg-slate-800 px-3 py-1 rounded text-xs border border-slate-700 hover:bg-slate-700">Clear</button>
+      </div>
+      <div class="bg-slate-900 rounded-lg border border-slate-700 p-3 font-mono text-xs h-96 overflow-y-auto scrollbar-thin" id="logTerminal">
+        <template x-for="(line, idx) in logLines" :key="idx">
+          <div class="flex gap-2 py-0.5" :class="line.level === 'ERROR' ? 'text-red-400' : line.level === 'WARNING' ? 'text-yellow-400' : line.level === 'DEBUG' ? 'text-slate-500' : 'text-slate-300'">
+            <span class="text-slate-600 shrink-0" x-text="line.ts"></span>
+            <span class="shrink-0 w-12 text-right" x-text="line.level"></span>
+            <span x-text="line.msg"></span>
+          </div>
+        </template>
+        <div x-show="logLines.length === 0" class="text-slate-600 py-2">Waiting for logs...</div>
+      </div>
     </div>
   </main>
 

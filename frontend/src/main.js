@@ -35,6 +35,16 @@ document.addEventListener("alpine:init", () => {
     savedRois: [],
     ocrResult: "",
 
+    // Analytics
+    stats: { total_gold: 0, total_elixir: 0, total_de: 0, total_raids: 0 },
+    attackHistory: [],
+    searchEfficiency: { avg_skips: 0, max_skips: 0, min_skips: 0 },
+
+    // Logs
+    logLines: [],
+    logFilter: "INFO",
+    wsLogs: null,
+
     // Farming config
     farmingConfig: {
       min_gold: 300000,
@@ -47,6 +57,8 @@ document.addEventListener("alpine:init", () => {
     init() {
       this.startFpsCounter();
       this.loadFarmingConfig();
+      this.loadAnalytics();
+      this.connectLogs();
     },
 
     startFpsCounter() {
@@ -311,6 +323,102 @@ document.addEventListener("alpine:init", () => {
           body: JSON.stringify(item),
         });
       }
+    },
+
+    async loadAnalytics() {
+      try {
+        const [summaryRes, historyRes, searchRes] = await Promise.all([
+          fetch("/api/v1/analytics/summary"),
+          fetch("/api/v1/analytics/history?limit=20"),
+          fetch("/api/v1/analytics/search-efficiency"),
+        ]);
+        this.stats = await summaryRes.json();
+        this.attackHistory = await historyRes.json();
+        this.searchEfficiency = await searchRes.json();
+        this.renderLootChart();
+      } catch (e) {
+        console.error("Analytics load failed:", e);
+      }
+    },
+
+    async renderLootChart() {
+      const ctx = document.getElementById("lootChart");
+      if (!ctx) return;
+      const res = await fetch("/api/v1/analytics/loot-rate?hours=24");
+      const data = await res.json();
+
+      if (this._lootChartInstance) this._lootChartInstance.destroy();
+
+      // Check if Chart is available
+      if (typeof Chart === "undefined") {
+        // Dynamic import
+        const { Chart: ChartJS, registerables } = await import("chart.js");
+        ChartJS.register(...registerables);
+      }
+
+      this._lootChartInstance = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: data.map(d => d.hour?.slice(11, 16) || ""),
+          datasets: [
+            { label: "Gold", data: data.map(d => d.gold), borderColor: "#facc15", backgroundColor: "transparent", tension: 0.3 },
+            { label: "Elixir", data: data.map(d => d.elixir), borderColor: "#f472b6", backgroundColor: "transparent", tension: 0.3 },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: "#94a3b8", font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: "#64748b", font: { size: 10 } }, grid: { color: "#1e293b" } },
+            y: { ticks: { color: "#64748b", font: { size: 10 }, callback: v => this.formatNumber(v) }, grid: { color: "#1e293b" } },
+          },
+        },
+      });
+    },
+
+    connectLogs() {
+      if (this.wsLogs) return;
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/ws/logs`);
+
+      ws.onopen = () => { ws.send(JSON.stringify({ filter: this.logFilter })); };
+      ws.onmessage = (event) => {
+        const entry = JSON.parse(event.data);
+        entry._id = Date.now() + Math.random();
+        this.logLines.push(entry);
+        if (this.logLines.length > 200) this.logLines.shift();
+        // Auto-scroll
+        this.$nextTick(() => {
+          const term = document.getElementById("logTerminal");
+          if (term) term.scrollTop = term.scrollHeight;
+        });
+      };
+      ws.onclose = () => { this.wsLogs = null; };
+      this.wsLogs = ws;
+    },
+
+    clearLogs() {
+      this.logLines = [];
+    },
+
+    formatNumber(n) {
+      if (n === null || n === undefined) return "0";
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+      if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+      return String(n);
+    },
+
+    formatTime(ts) {
+      if (!ts) return "--";
+      const d = new Date(ts);
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    },
+
+    // Tab watcher for analytics and logs
+    watchTab(tab) {
+      if (tab === 'analytics') this.loadAnalytics();
+      if (tab === 'logs') this.connectLogs();
     },
   }));
 });

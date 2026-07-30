@@ -45,6 +45,12 @@ class FsmController:
         self.state_started_at: float = 0
         self.recovery_count: int = 0
 
+        # Break interval scheduler
+        self.break_interval: int = 7200  # 2 hours
+        self.break_duration_min: int = 600  # 10 min
+        self.break_duration_max: int = 1200  # 20 min
+        self._last_break_time: float = 0
+
         # Runtime stats
         self.gold_earned: int = 0
         self.elixir_earned: int = 0
@@ -73,6 +79,24 @@ class FsmController:
             "dark_elixir_earned": self.dark_elixir_earned,
             "raids_completed": self.raids_completed,
         }
+
+    async def maybe_take_break(self):
+        """Check if it's time for a rest break. Returns True if break was taken."""
+        if self._last_break_time == 0:
+            self._last_break_time = time.time()
+            return False
+
+        elapsed = time.time() - self._last_break_time
+        if elapsed < self.break_interval:
+            return False
+
+        import random
+        duration = random.randint(self.break_duration_min, self.break_duration_max)
+        logger.info("FSM: Taking break for %d seconds (%d minutes)", duration, duration // 60)
+        await asyncio.sleep(duration)
+        self._last_break_time = time.time()
+        logger.info("FSM: Break finished, resuming")
+        return True
 
     def check_timeout(self) -> bool:
         """Return True if the current state has timed out."""
@@ -107,6 +131,9 @@ class FsmController:
         while self._running:
             if self.state in (BotState.STOPPED, BotState.DEAD):
                 break
+
+            # Check for break interval
+            await self.maybe_take_break()
 
             # Check for timeout
             if self.check_timeout() and self.state != BotState.INIT:
