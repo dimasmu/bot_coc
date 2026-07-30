@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:\\\\programming\\\\python\" log --oneline -30)",
+      "Bash(dir:*)",
+      "Bash(bash:*)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(git init:*)",
+      "Bash(uv:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(COC_HOST=\"0.0.0.0\" COC_PORT=\"9000\" uv run python:*)",
+      "Bash(PYTHONIOENCODING=utf-8 uvicorn:*)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(npm install)",
+      "Bash(npx vite:*)",
+      "Bash(ls:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(chmod:*)"
+    ]
+  }
+}

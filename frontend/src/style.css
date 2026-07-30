@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* Custom scrollbar for log terminal */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+/* Canvas container: maintain aspect ratio for 1280x720 */
+.canvas-container {
+  aspect-ratio: 16 / 9;
+  max-height: calc(100vh - 200px);
+}
