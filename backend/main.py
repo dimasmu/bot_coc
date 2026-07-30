@@ -12,6 +12,9 @@ from fastapi.responses import FileResponse
 
 from backend.config import settings
 from backend.adb.manager import adb_manager
+from backend.db.database import init_db
+from backend.api.ws_status import router as status_router
+from backend.engine.fsm import fsm_controller
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -22,10 +25,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: nothing to initialize. Shutdown: disconnect ADB."""
+    """Startup: initialize database. Shutdown: disconnect ADB."""
     logger.info("CoC-AutoWeb server starting on %s:%d", settings.host, settings.port)
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database ready")
     yield
-    logger.info("Shutting down, disconnecting ADB...")
+    logger.info("Shutting down, stopping FSM...")
+    if fsm_controller.is_running:
+        await fsm_controller.stop()
+    logger.info("Disconnecting ADB...")
     await adb_manager.disconnect()
 
 
@@ -44,15 +53,42 @@ app.add_middleware(
 
 from backend.api.ws_screen import router as screen_router
 from backend.api.rest_adb import router as adb_router
+from backend.api.rest_roi import router as roi_router
+from backend.api.rest_config import router as config_router
 
 app.include_router(screen_router)
 app.include_router(adb_router)
+app.include_router(roi_router)
+app.include_router(status_router)
+app.include_router(config_router)
 
 
 @app.get("/api/v1/health")
 async def health_check():
     """Basic health check endpoint."""
     return {"status": "ok", "adb_connected": adb_manager.is_connected}
+
+
+@app.post("/api/v1/bot/start")
+async def bot_start():
+    """Start the FSM bot loop."""
+    if not fsm_controller.is_running:
+        await fsm_controller.start()
+    return fsm_controller.get_status_dict()
+
+
+@app.post("/api/v1/bot/stop")
+async def bot_stop():
+    """Stop the FSM bot loop."""
+    if fsm_controller.is_running:
+        await fsm_controller.stop()
+    return fsm_controller.get_status_dict()
+
+
+@app.get("/api/v1/bot/status")
+async def bot_status():
+    """Get current FSM state and stats."""
+    return fsm_controller.get_status_dict()
 
 
 # In production, serve the built frontend

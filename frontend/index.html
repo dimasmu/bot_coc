@@ -98,12 +98,113 @@
       </div>
     </div>
 
-    <!-- Tabs 2-6: Placeholder shells -->
-    <template x-for="tab in tabs.filter(t => t.id !== 'dashboard')" :key="tab.id">
-      <div x-show="activeTab === tab.id" class="flex items-center justify-center h-64">
-        <p class="text-slate-500 text-lg" x-text="tab.label + ' \u2014 Coming Soon'"></p>
+    <!-- Tab 2: Calibrator -->
+    <div x-show="activeTab === 'calibrator'" class="flex gap-4 flex-wrap">
+      <!-- Screenshot canvas -->
+      <div class="flex-1 min-w-[400px]">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden canvas-container relative" id="calibratorContainer">
+          <canvas id="calibratorCanvas" class="w-full h-full object-contain bg-black"></canvas>
+          <!-- ROI overlay box -->
+          <div id="roiBox" class="absolute border-2 border-blue-400 bg-blue-400/20 pointer-events-none hidden"></div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button @click="captureScreenshot()" :disabled="!adbStatus.connected"
+            class="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm transition-colors">
+            Capture Screenshot
+          </button>
+          <button @click="saveRoi()" :disabled="!roiActive"
+            class="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm transition-colors">
+            Save ROI
+          </button>
+          <button @click="testOcr()" :disabled="!roiActive"
+            class="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm transition-colors">
+            Test OCR
+          </button>
+          <button @click="clearRoi()" :disabled="!roiActive"
+            class="bg-slate-600 hover:bg-slate-500 text-white px-4 py-1.5 rounded text-sm transition-colors">
+            Clear
+          </button>
+        </div>
+        <div x-show="roiActive" class="mt-2 p-2 bg-slate-800 rounded border border-slate-700 text-xs font-mono">
+          ROI: <span x-text="roiCoords">0, 0, 0, 0</span>
+          <span x-show="ocrResult" class="ml-4">| OCR: <span x-text="ocrResult" class="text-green-400"></span></span>
+        </div>
       </div>
-    </template>
+
+      <!-- ROI list panel -->
+      <div class="w-64 flex flex-col gap-3">
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Saved ROIs</h3>
+          <input x-model="roiName" placeholder="ROI name (e.g. btn_attack)"
+            class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm w-full mb-2 font-mono" />
+          <div class="space-y-1 max-h-80 overflow-y-auto" id="roiList">
+            <template x-for="roi in savedRois" :key="roi.id">
+              <div class="flex items-center justify-between text-xs bg-slate-700 rounded p-1.5">
+                <span x-text="roi.roi_name" class="text-blue-300 font-mono"></span>
+                <button @click="deleteRoi(roi.id)" class="text-red-400 hover:text-red-300">&times;</button>
+              </div>
+            </template>
+            <p x-show="savedRois.length === 0" class="text-slate-500 text-xs">No ROIs saved yet</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Farming -->
+    <div x-show="activeTab === 'farming'" class="max-w-md">
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-4">
+        <h3 class="text-sm uppercase tracking-wider text-slate-400 mb-3">Loot Thresholds</h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-slate-400">Min Gold</label>
+            <input type="number" x-model="farmingConfig.min_gold" @change="saveFarmingConfig()"
+              class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm w-full mt-1" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">Min Elixir</label>
+            <input type="number" x-model="farmingConfig.min_elixir" @change="saveFarmingConfig()"
+              class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm w-full mt-1" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">Min Dark Elixir</label>
+            <input type="number" x-model="farmingConfig.min_dark_elixir" @change="saveFarmingConfig()"
+              class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm w-full mt-1" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">Max Search Skipping</label>
+            <input type="number" x-model="farmingConfig.max_searches" @change="saveFarmingConfig()"
+              class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm w-full mt-1" />
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+        <h3 class="text-sm uppercase tracking-wider text-slate-400 mb-3">Deployment Strategy</h3>
+        <div class="space-y-2">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="radio" x-model="farmingConfig.strategy" value="4finger" @change="saveFarmingConfig()" />
+            <span>4-Finger Drop</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="radio" x-model="farmingConfig.strategy" value="perimeter" @change="saveFarmingConfig()" />
+            <span>Perimeter Line Sweep</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="radio" x-model="farmingConfig.strategy" value="snipe" @change="saveFarmingConfig()" />
+            <span>Collector Snipe</span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div x-show="activeTab === 'builder'" class="flex items-center justify-center h-64">
+      <p class="text-slate-500 text-lg">Builder -- Coming Soon</p>
+    </div>
+    <div x-show="activeTab === 'analytics'" class="flex items-center justify-center h-64">
+      <p class="text-slate-500 text-lg">Analytics -- Coming Soon</p>
+    </div>
+    <div x-show="activeTab === 'logs'" class="flex items-center justify-center h-64">
+      <p class="text-slate-500 text-lg">Logs -- Coming Soon</p>
+    </div>
   </main>
 
 </body>
