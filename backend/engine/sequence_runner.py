@@ -237,29 +237,6 @@ class SequenceRunner:
         except Exception:
             return CardResult(count=None, has_badge=False)
 
-    async def _card_is_grey(self, adb, card):
-        """Check if card is grey/depleted. Uses saturation (not brightness)."""
-        try:
-            screen = await adb.screencap()
-            if not screen:
-                return False
-            nparr = np.frombuffer(screen, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            hx = max(0, card["x"] - 25)
-            hy = max(0, card["card_top"] + 15)
-            roi = img[hy:hy + 55, hx:hx + 50]
-            if roi.size == 0:
-                return False
-            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            v_mean = float(np.mean(hsv[:, :, 2]))  # brightness
-            s_mean = float(np.mean(hsv[:, :, 1]))  # saturation
-            # Grey/depleted cards are desaturated (low S) but may still be bright
-            is_grey = s_mean < 50
-            logger.info("  Card X=%d V=%.1f S=%.1f grey=%s", card["x"], v_mean, s_mean, is_grey)
-            return is_grey
-        except Exception:
-            return True
-
     async def _do_attack(self, step, adb):
         config = json.loads(step.config_json) if step.config_json else {}
         duration = config.get("duration", 180)
