@@ -209,6 +209,34 @@ class SequenceRunner:
 
         return cards
 
+    async def _read_card_count(self, adb, card) -> CardResult:
+        """Read a card's count badge via OCR. Classifies as hero, empty, or active."""
+        from backend.vision.ocr import read_card_badge, _check_badge_texture
+
+        try:
+            screen = await adb.screencap()
+            if not screen:
+                return CardResult(count=None, has_badge=False)
+
+            count = read_card_badge(screen, card["x"], card["card_top"])
+
+            if count is not None:
+                return CardResult(count=count, has_badge=True)
+
+            # OCR returned nothing — determine hero vs failed OCR
+            white_pct = _check_badge_texture(screen, card["x"], card["card_top"])
+            if white_pct < 0.05:
+                # Uniform/dark region → no badge → HERO
+                return CardResult(count=None, has_badge=False)
+
+            # Textured region but OCR failed — retry possible, conservative fallback
+            logger.warning("  Card X=%d: badge texture detected (%.2f%%) but OCR missed number",
+                           card["x"], white_pct * 100)
+            return CardResult(count=5, has_badge=True)
+
+        except Exception:
+            return CardResult(count=None, has_badge=False)
+
     async def _card_is_grey(self, adb, card):
         """Check if card is grey/depleted. Uses saturation (not brightness)."""
         try:
