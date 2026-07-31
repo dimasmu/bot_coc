@@ -274,22 +274,60 @@ class SequenceRunner:
             await asyncio.sleep(duration)
             return
 
-        logger.info("Detected %d cards, deploying...", len(cards))
-
         # Hardcoded deploy zone centers (from user's calibrated deploy_1..deploy_9)
         DEPLOY_ZONES = [
             (70, 345), (160, 257), (333, 129),
             (457, 36), (850, 32), (994, 137),
             (1162, 262), (1092, 485), (964, 552),
-        ]        # Track which cards have been confirmed grey — once grey, never re-check
-        grey_cards = set()
+        ]
 
+        # PHASE 1: classify all cards
+        depleted = set()   # X0 or heroes that have been used
+        heroes = set()     # hero cards (no badge, one-time deploy)
+
+        for i, card in enumerate(cards):
+            result = await self._read_card_count(adb, card)
+            if result.count == 0:
+                depleted.add(i)
+                logger.info("  Card %d at X=%d: X0, skipping", i + 1, card["x"])
+            elif result.count is None and not result.has_badge:
+                heroes.add(i)
+                logger.info("  Card %d at X=%d: HERO (no badge)", i + 1, card["x"])
+            else:
+                count_label = result.count if result.count else "?"
+                logger.info("  Card %d at X=%d: count=%s", i + 1, card["x"], count_label)
+
+        logger.info("Detected %d cards: %d heroes, %d active, %d depleted",
+                     len(cards), len(heroes),
+                     len(cards) - len(depleted) - len(heroes), len(depleted))
+
+        # PHASE 2: deploy loop
         end_time = time.time() + duration
         while self._running and time.time() < end_time:
-            active = [i for i in range(len(cards)) if i not in grey_cards]
+            active = [i for i in range(len(cards))
+                      if i not in depleted and i not in heroes]
             if not active:
-                logger.info("All cards grey — deployment complete")
-                break
+                # Check if any heroes remain
+                remaining_heroes = [i for i in range(len(cards))
+                                    if i not in depleted and i in heroes]
+                if not remaining_heroes:
+                    logger.info("All cards deployed — deployment complete")
+                    break
+
+                # Deploy remaining heroes
+                for i in remaining_heroes:
+                    if not self._running or time.time() >= end_time:
+                        break
+                    card = cards[i]
+                    cx, cy = card["x"], card["y"]
+                    logger.info("  Hero %d at (%d,%d): deploying", i + 1, cx, cy)
+                    await human_tap(adb, cx, cy, sigma=2)
+                    await human_delay(0.1, 0.3)
+                    zx, zy = random.choice(DEPLOY_ZONES)
+                    await human_tap(adb, zx, zy, sigma=8)
+                    depleted.add(i)
+                    await human_delay(0.05, 0.15)
+                continue
 
             for i in active:
                 if not self._running or time.time() >= end_time:
@@ -298,18 +336,23 @@ class SequenceRunner:
                 card = cards[i]
                 cx, cy = card["x"], card["y"]
 
-                # Only check grey for cards we haven't confirmed yet
-                if i not in grey_cards and await self._card_is_grey(adb, card):
-                    grey_cards.add(i)
-                    logger.info("  Card %d at (%d,%d): turned grey, flagged", i + 1, cx, cy)
+                # Re-read count (may have changed since last deploy)
+                result = await self._read_card_count(adb, card)
+                if result.count is None or result.count == 0:
+                    depleted.add(i)
+                    logger.info("  Card %d at (%d,%d): depleted (count=%s)",
+                                i + 1, cx, cy, result.count)
                     continue
 
                 await human_tap(adb, cx, cy, sigma=2)
-                logger.info("  Card %d at (%d,%d): 50 taps", i + 1, cx, cy)
-                for _ in range(50):
+                n_taps = min(result.count, 10)
+                logger.info("  Card %d at (%d,%d): %d taps (count=%d)",
+                            i + 1, cx, cy, n_taps, result.count)
+                for _ in range(n_taps):
                     zx, zy = random.choice(DEPLOY_ZONES)
                     await human_tap(adb, zx, zy, sigma=8)
                     await human_delay(0.005, 0.01)
+                await human_delay(0.05, 0.15)
 
         remaining = max(0, end_time - time.time())
         if remaining > 0:
