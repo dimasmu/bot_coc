@@ -1,0 +1,158 @@
+"""OCR utilities using EasyOCR for reading numbers from game screen."""
+
+import logging
+import os
+import re
+
+import cv2
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+_reader = None
+
+
+def _get_reader():
+    global _reader
+    if _reader is None:
+        import easyocr
+        _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        logger.info("EasyOCR initialized")
+    return _reader
+
+
+# Padding config — tuned per user with diagnostic images
+_PADDING = {
+    "gold_number":   (2, 80, -4, 4),
+    "elixir_number": (2, 80, 0, 4),
+}
+
+
+def _get_padding(roi_name):
+    if roi_name in _PADDING:
+        return _PADDING[roi_name]
+    if roi_name.endswith("_number"):
+        return (2, 80, 0, 4)
+    if roi_name:
+        return (8, 8, 8, 8)
+    return (0, 0, 0, 0)
+
+
+def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
+                roi_name: str = "") -> int | None:
+    """Read a number from a region using EasyOCR."""
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+
+        pad_left, pad_right, pad_top, pad_bottom = _get_padding(roi_name)
+        x1 = max(0, x - pad_left)
+        y1 = max(0, y - pad_top)
+        x2 = min(w, x + width + pad_right)
+        y2 = min(h, y + height + pad_bottom)
+
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        roi = img[y1:y2, x1:x2]
+        # Scale up 2x for small text
+        roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+
+        reader = _get_reader()
+        results = reader.readtext(roi, allowlist="0123456789", detail=0, paragraph=True)
+        for r in results:
+            text = re.sub(r"\D", "", r)
+            if text:
+                val = int(text)
+                logger.debug("EasyOCR %s → %d (raw=%r)", roi_name or "generic", val, r)
+                return val
+
+        return None
+    except Exception as e:
+        logger.error("EasyOCR read_number failed: %s", e)
+        return None
+
+
+def read_card_badge(screenshot: bytes, card_x: int, card_top: int) -> int | None:
+    """Read the troop/spell count from a card's badge region.
+
+    Badge is a small white-on-dark label in the top-right corner of each
+    troop/spell card (e.g. "X2", "X10"). Heroes have no badge.
+
+    Args:
+        screenshot: PNG bytes from adb screencap
+        card_x: center X of the card slot
+        card_top: top Y of the card slot
+
+    Returns:
+        The count number, or None if no number could be read.
+    """
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+
+        # Badge region: top-right corner of the card slot
+        badge_x = card_x + 8
+        badge_y = card_top + 4
+        badge_w, badge_h = 28, 24
+
+        x1 = max(0, badge_x)
+        y1 = max(0, badge_y)
+        x2 = min(w, x1 + badge_w)
+        y2 = min(h, y1 + badge_h)
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        roi = img[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        scaled = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+
+        # OTSU threshold — white text on dark background
+        _, thresh = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        reader = _get_reader()
+        results = reader.readtext(thresh, allowlist="0123456789", detail=0, paragraph=True)
+        for r in results:
+            text = re.sub(r"\D", "", r)
+            if text:
+                val = int(text)
+                logger.debug("Card badge OCR → %d (raw=%r, card_x=%d)", val, r, card_x)
+                return val
+
+        return None
+    except Exception as e:
+        logger.error("read_card_badge failed: %s", e)
+        return None
+
+
+def _check_badge_texture(screenshot: bytes, card_x: int, card_top: int) -> float:
+    """Return white pixel percentage in the badge region after OTSU threshold.
+
+    High pct → badge content exists (OCR should succeed).
+    Low pct → uniform/dark → probably hero (no badge).
+    """
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+
+        badge_x = card_x + 8
+        badge_y = card_top + 4
+        badge_w, badge_h = 28, 24
+
+        x1 = max(0, badge_x)
+        y1 = max(0, badge_y)
+        x2 = min(w, x1 + badge_w)
+        y2 = min(h, y1 + badge_h)
+        if x2 <= x1 or y2 <= y1:
+            return 0.0
+
+        roi = img[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        white_pct = float(np.count_nonzero(thresh)) / thresh.size
+        return white_pct
+    except Exception:
+        return 0.0
