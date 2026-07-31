@@ -9,12 +9,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from backend.config import settings
 from backend.adb.manager import adb_manager
 from backend.db.database import init_db
 from backend.api.ws_status import router as status_router
-from backend.engine.fsm import fsm_controller
+from backend.engine.sequence_runner import sequence_runner
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -32,8 +33,8 @@ async def lifespan(app: FastAPI):
     logger.info("Database ready")
     yield
     logger.info("Shutting down, stopping FSM...")
-    if fsm_controller.is_running:
-        await fsm_controller.stop()
+    if sequence_runner.is_running:
+        await sequence_runner.stop()
     logger.info("Disconnecting ADB...")
     await adb_manager.disconnect()
 
@@ -57,6 +58,7 @@ from backend.api.rest_roi import router as roi_router
 from backend.api.rest_config import router as config_router
 from backend.api.rest_analytics import router as analytics_router
 from backend.api.ws_logs import router as logs_router
+from backend.api.rest_sequence import router as sequence_router
 
 app.include_router(screen_router)
 app.include_router(adb_router)
@@ -65,6 +67,7 @@ app.include_router(status_router)
 app.include_router(config_router)
 app.include_router(analytics_router)
 app.include_router(logs_router)
+app.include_router(sequence_router)
 
 
 @app.get("/api/v1/health")
@@ -73,26 +76,30 @@ async def health_check():
     return {"status": "ok", "adb_connected": adb_manager.is_connected}
 
 
+class BotStartRequest(BaseModel):
+    sequence_id: int | None = None
+
+
 @app.post("/api/v1/bot/start")
-async def bot_start():
+async def bot_start(req: BotStartRequest = BotStartRequest()):
     """Start the FSM bot loop."""
-    if not fsm_controller.is_running:
-        await fsm_controller.start()
-    return fsm_controller.get_status_dict()
+    if not sequence_runner.is_running:
+        await sequence_runner.start(sequence_id=req.sequence_id)
+    return sequence_runner.get_status_dict()
 
 
 @app.post("/api/v1/bot/stop")
 async def bot_stop():
     """Stop the FSM bot loop."""
-    if fsm_controller.is_running:
-        await fsm_controller.stop()
-    return fsm_controller.get_status_dict()
+    if sequence_runner.is_running:
+        await sequence_runner.stop()
+    return sequence_runner.get_status_dict()
 
 
 @app.get("/api/v1/bot/status")
 async def bot_status():
     """Get current FSM state and stats."""
-    return fsm_controller.get_status_dict()
+    return sequence_runner.get_status_dict()
 
 
 @app.get("/api/v1/system/backup")

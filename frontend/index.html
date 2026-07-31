@@ -86,6 +86,12 @@
             <span class="inline-block px-2 py-1 rounded text-xs font-bold"
               :class="botState === 'STOPPED' ? 'bg-slate-700 text-slate-300' : botState === 'DEAD' ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'"
               x-text="botState">IDLE</span>
+            <select x-model="activeSequenceId" class="w-full mt-2 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs">
+              <option :value="null">-- Choose Sequence --</option>
+              <template x-for="seq in sequences" :key="seq.id">
+                <option :value="seq.id" x-text="seq.name"></option>
+              </template>
+            </select>
             <div class="flex gap-2 mt-3">
               <button @click="startBot()" :disabled="botRunning || !adbStatus.connected"
                 class="bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-1 rounded text-xs transition-colors flex-1">

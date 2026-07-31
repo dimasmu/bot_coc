@@ -31,6 +31,7 @@ document.addEventListener("alpine:init", () => {
     botState: "STOPPED",
     botRunning: false,
     wsBotStatus: null,
+    activeSequenceId: null,
 
     // Calibrator state
     roiName: "",
@@ -133,7 +134,12 @@ document.addEventListener("alpine:init", () => {
     },
 
     async startBot() {
-      const res = await fetch("/api/v1/bot/start", { method: "POST" });
+      const body = this.activeSequenceId ? JSON.stringify({ sequence_id: this.activeSequenceId }) : "{}";
+      const res = await fetch("/api/v1/bot/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
       const data = await res.json();
       this.botState = data.state;
       this.botRunning = data.running;
@@ -629,6 +635,11 @@ document.addEventListener("alpine:init", () => {
     async loadSequences() {
       const res = await fetch("/api/v1/sequences");
       this.sequences = await res.json();
+      // Auto-select active sequence in dropdown
+      const active = this.sequences.find(s => s.is_active);
+      if (active) this.activeSequenceId = active.id;
+      else if (this.sequences.length > 0) this.activeSequenceId = this.sequences[0].id;
+
       if (this.sequences.length > 0) {
         this.selectedSequence = this.sequences[0];
         this.selectedSequence.steps = this.selectedSequence.steps || [];
