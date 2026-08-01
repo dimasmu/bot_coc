@@ -610,21 +610,22 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.5, 2.5)
 
-        # Step 2: Find "Suggested Upgrades" label, tap 60px below to hit first item
+        # Step 2: Find first suggested upgrade item and tap it
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.6)
+        # Try template matching first, fall back to fixed position
+        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.5)
         if sug_pos:
-            await human_tap(adb, sug_pos[0], sug_pos[1] + 60, sigma=5)
-            logger.info("Tapped suggested upgrade at (%d,%d)", sug_pos[0], sug_pos[1] + 60)
-            await human_delay(0.8, 1.5)
+            tap_x, tap_y = sug_pos[0], sug_pos[1] + 60
+            logger.info("Found Suggested label at (%d,%d)", sug_pos[0], sug_pos[1])
         else:
-            logger.warning("Suggested Upgrades label not found")
-            await human_tap(adb, menu_cx, menu_cy, sigma=3)
-            self._upgrade_target = None
-            return
+            # Fallback: tap first item position in builder menu (center, ~1/3 down)
+            tap_x, tap_y = 400, 280
+            logger.info("Label not found, using fallback position (%d,%d)", tap_x, tap_y)
+        await human_tap(adb, tap_x, tap_y, sigma=5)
+        await human_delay(0.8, 1.5)
 
         # Step 3: Close menu to reveal hammer
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
