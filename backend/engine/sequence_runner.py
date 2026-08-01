@@ -449,7 +449,11 @@ class SequenceRunner:
             await human_delay(0.3, 0.8)
             return
 
-        # Keep builder menu open for _do_upgrade_execute
+        # Tap upgrade button in builder menu to select the building
+        await human_tap(adb, building["x"], building["y"], sigma=3)
+        await human_delay(0.5, 1.0)
+
+        # Keep builder menu open — execute will close it to reveal hammer
         self._upgrade_target = building
         logger.info("Ready to upgrade: %s (coords: %d,%d)",
                      building["name"], building["x"], building["y"])
