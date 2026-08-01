@@ -542,7 +542,7 @@ class SequenceRunner:
         """Two-AI-call: select building in menu, find upgrade button on base, confirm."""
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate
-        from backend.vision.ai import MENU_PROMPT
+        from backend.vision.ai import MENU_PROMPT, BASE_PROMPT
 
         target = getattr(self, "_upgrade_target", None) or {}
         resources = target.get("resources", {"gold": 0, "elixir": 0, "dark_elixir": 0})
