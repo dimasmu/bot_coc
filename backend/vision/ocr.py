@@ -127,6 +127,39 @@ def read_card_badge(screenshot: bytes, card_x: int, card_top: int) -> int | None
         return None
 
 
+def find_text(screenshot: bytes, keyword: str) -> tuple[int, int] | None:
+    """Find a keyword in the screenshot using EasyOCR. Returns (cx, cy) or None.
+
+    Args:
+        screenshot: PNG bytes from adb screencap
+        keyword: Text to search for (case-insensitive partial match)
+
+    Returns:
+        Center pixel coordinates of the found text bounding box, or None.
+    """
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+
+        reader = _get_reader()
+        results = reader.readtext(img, detail=1, paragraph=False)
+        keyword_lower = keyword.lower()
+        for bbox, text, conf in results:
+            if keyword_lower in text.lower():
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                cx = int(sum(xs) / len(xs))
+                cy = int(sum(ys) / len(ys))
+                logger.info("Found '%s' at (%d,%d) conf=%.2f", text, cx, cy, conf)
+                return (cx, cy)
+        logger.debug("Text '%s' not found with OCR", keyword)
+        return None
+    except Exception as e:
+        logger.error("find_text failed: %s", e)
+        return None
+
+
 def _check_badge_texture(screenshot: bytes, card_x: int, card_top: int) -> float:
     """Return white pixel percentage in the badge region after OTSU threshold.
 

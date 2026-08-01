@@ -589,8 +589,18 @@ class SequenceRunner:
             return
 
         # Tap building row then close menu
-        logger.info("Selecting: %s at (%d,%d)", bld["name"], bld["x"], bld["y"])
-        await human_tap(adb, bld["x"], bld["y"], sigma=5)
+        # Tap building row using OCR to find "Suggested" text
+        from backend.vision.ocr import find_text
+        suggested_pos = find_text(screen, "Suggested")
+        if suggested_pos:
+            tap_x, tap_y = suggested_pos[0], suggested_pos[1] + 80
+            logger.info("OCR found Suggested at (%d,%d), tapping at (%d,%d)",
+                         suggested_pos[0], suggested_pos[1], tap_x, tap_y)
+        else:
+            # Fallback: use AI coordinates
+            tap_x, tap_y = bld["x"], bld["y"]
+            logger.info("OCR not found, using AI coords (%d,%d)", tap_x, tap_y)
+        await human_tap(adb, tap_x, tap_y, sigma=5)
         await human_delay(0.5, 1.0)
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(0.5, 1.0)
