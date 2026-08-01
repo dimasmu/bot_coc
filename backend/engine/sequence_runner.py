@@ -585,7 +585,9 @@ class SequenceRunner:
         logger.debug("Debug screenshot saved: %s", filepath)
 
     async def _do_upgrade_execute(self, adb):
-        """Execute upgrade using coordinates from _do_upgrade_check (menu already open)."""
+        """Execute upgrade: close builder menu, find hammer, tap confirm."""
+        from backend.db.database import get_session
+        from backend.db.models import RoiTemplate
         from backend.vision.matching import match_template
 
         if not getattr(self, "_upgrade_target", None):
@@ -594,27 +596,47 @@ class SequenceRunner:
 
         building = self._upgrade_target
         self.state = "UPGRADING"
-        logger.info("Upgrading: %s at (%d,%d) cost=%d %s",
-                     building["name"], building["x"], building["y"],
-                     building["cost"], building["resource"])
+        logger.info("Upgrading: %s (cost=%d %s)",
+                     building["name"], building["cost"], building["resource"])
 
-        await human_tap(adb, building["x"], building["y"], sigma=3)
-        await human_delay(0.8, 1.5)
+        # Step 1: Close builder menu (open from upgrade_check)
+        with get_session() as session:
+            menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
+        if not menu_roi:
+            self._upgrade_target = None
+            return
+        menu_cx = menu_roi.x_pos + menu_roi.width // 2
+        menu_cy = menu_roi.y_pos + menu_roi.height // 2
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(1.0, 2.0)
 
+        # Step 2: Find hammer button on base screen
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        confirm_pos = None
-        for tpl_path in self._TPL_CONFIRM:
-            confirm_pos = match_template(screen, tpl_path, threshold=0.7)
-            if confirm_pos:
-                break
-        if confirm_pos:
-            await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
+        if not hammer_pos:
+            logger.warning("Hammer button not found")
+            self._upgrade_target = None
+            return
+        await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+        await human_delay(1.0, 2.0)
+
+        # Step 3: Tap confirm button via calibrated ROI
+        screen = await adb.screencap()
+        if not screen:
+            self._upgrade_target = None
+            return
+        with get_session() as session:
+            confirm_roi = session.query(RoiTemplate).filter_by(roi_name="btn_confirm_upgrade").first()
+        if confirm_roi:
+            cx = confirm_roi.x_pos + confirm_roi.width // 2
+            cy = confirm_roi.y_pos + confirm_roi.height // 2
+            await human_tap(adb, cx, cy, sigma=3)
             await human_delay(0.5, 1.0)
         else:
-            logger.warning("Confirm button not found")
+            logger.warning("btn_confirm_upgrade ROI not calibrated")
             self._upgrade_target = None
             return
 
