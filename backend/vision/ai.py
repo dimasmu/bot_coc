@@ -44,6 +44,50 @@ IMPORTANT RULES:
 - resource: "gold", "elixir", or "dark_elixir" """
 
 
+MENU_PROMPT = """You are a Clash of Clans bot assistant. Analyze this screenshot (1280x720).
+This is the Builder Suggestions menu.
+
+Find the FIRST building listed under "Suggested Upgrades".
+Return the pixel coordinates of the BUILDING ROW (the area with the building name/icon).
+We will click this row to select the building for upgrade.
+
+Return ONLY valid JSON:
+{
+  "buildings": [
+    {"name": "Archer Tower", "x": 450, "y": 220, "cost": 800000, "resource": "gold"}
+  ]
+}
+
+RULES:
+- x,y must be integers in range 0-1279 and 0-719
+- x,y should point to the row center (name/icon area, NOT the upgrade button)
+- cost must be integer (no commas)
+- resource: "gold", "elixir", or "dark_elixir"
+- Only return the FIRST affordable suggested upgrade"""
+
+
+BASE_PROMPT = """You are a Clash of Clans bot assistant. Analyze this screenshot (1280x720).
+A building was just selected for upgrade from the builder menu. The menu is now closed.
+
+Find the Upgrade/Info button that appeared on screen. It may look like:
+- A hammer icon with a cost number next to a resource icon (gold/elixir/dark-elixir)
+- A cogwheel/gear icon
+- A green "Upgrade" button
+
+Return the exact center coordinates of this button.
+
+Return ONLY valid JSON:
+{
+  "buildings": [
+    {"name": "UpgradeButton", "x": 500, "y": 300, "cost": 0, "resource": "gold"}
+  ]
+}
+
+RULES:
+- x,y must be integers in range 0-1279 and 0-719
+- point to the EXACT center of the clickable upgrade button"""
+
+
 def _parse_response(raw_text: str) -> list[dict] | None:
     """Parse AI response text into validated list of building dicts.
 
@@ -134,15 +178,17 @@ class DashScopeClient:
     def available(self) -> bool:
         return bool(self._api_key)
 
-    def analyze_screenshot(self, png_bytes: bytes) -> list[dict] | None:
+    def analyze_screenshot(self, png_bytes: bytes, prompt_override: str | None = None) -> list[dict] | None:
         """Analyze a builder menu screenshot and return upgradable buildings.
 
         Args:
             png_bytes: Raw PNG image bytes (1280x720).
+            prompt_override: Optional custom prompt. Uses default if None.
 
         Returns:
             List of building dicts, empty list for no upgrades, None on failure.
         """
+        prompt = prompt_override if prompt_override else self._prompt
         if not self.available:
             logger.warning("DashScope API key not configured")
             return None
@@ -159,7 +205,7 @@ class DashScopeClient:
             "role": "user",
             "content": [
                 {"image": f"data:image/png;base64,{image_b64}"},
-                {"text": self._prompt},
+                {"text": prompt},
             ]
         }]
 
