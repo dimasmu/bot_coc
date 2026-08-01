@@ -454,14 +454,18 @@ class SequenceRunner:
         if self._ai_client is not None:
             return self._ai_client
         from backend.vision.ai import DashScopeClient
-        with get_session() as session:
-            cfg = session.query(Config).filter_by(key="dashscope_api_key").first()
-        api_key = cfg.value.strip() if cfg and cfg.value else None
-        self._ai_client = DashScopeClient(api_key=api_key)
-        if self._ai_client.available:
-            logger.info("DashScope AI client initialized")
-        else:
-            logger.info("DashScope API key not configured — AI disabled")
+        try:
+            with get_session() as session:
+                cfg = session.query(Config).filter_by(key="dashscope_api_key").first()
+            api_key = cfg.value.strip() if cfg and cfg.value else None
+            self._ai_client = DashScopeClient(api_key=api_key)
+            if self._ai_client.available:
+                logger.info("DashScope AI client initialized")
+            else:
+                logger.info("DashScope API key not configured — AI disabled")
+        except Exception as e:
+            logger.error("Failed to initialize DashScope client: %s", e)
+            self._ai_client = DashScopeClient(api_key=None)
         return self._ai_client
 
     def _save_debug_screenshot(self, png_bytes: bytes):
@@ -520,6 +524,9 @@ class SequenceRunner:
         client = self._get_ai_client()
         if not client.available:
             logger.warning("AI client unavailable — falling back to template matching")
+            # Close builder menu so template path can open it fresh
+            await human_tap(adb, menu_cx, menu_cy, sigma=3)
+            await human_delay(0.3, 0.8)
             await self._do_upgrade_execute_template(adb)
             return
 
@@ -527,6 +534,9 @@ class SequenceRunner:
 
         if ai_buildings is None:
             logger.warning("AI analysis failed — falling back to template matching")
+            # Close builder menu so template path can open it fresh
+            await human_tap(adb, menu_cx, menu_cy, sigma=3)
+            await human_delay(0.3, 0.8)
             await self._do_upgrade_execute_template(adb)
             return
 
