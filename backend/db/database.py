@@ -78,7 +78,6 @@ def init_db():
     upgrade_steps = [
         ("upgrade_check", 0, None, None, None),
         ("upgrade_execute", 1, None, None, None),
-        ("return_home", 2, None, None, None),
     ]
 
     with Session(engine) as session:
