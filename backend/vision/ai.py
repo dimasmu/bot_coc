@@ -200,6 +200,11 @@ class DashScopeClient:
             logger.error("dashscope package not installed")
             return None
 
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(png_bytes))
+        logger.info("Screenshot: %dx%d", img.width, img.height)
+
         image_b64 = base64.b64encode(png_bytes).decode("ascii")
 
         messages = [{
