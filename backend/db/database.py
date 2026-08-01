@@ -33,6 +33,7 @@ def init_db():
             ("min_dark_elixir_threshold", "500", "FARMING"),
             ("max_searches", "30", "FARMING"),
             ("strategy", "4finger", "FARMING"),
+            ("dashscope_api_key", "", "AI"),
         ]
         for key, value, category in defaults:
             if not session.query(Config).filter_by(key=key).first():
