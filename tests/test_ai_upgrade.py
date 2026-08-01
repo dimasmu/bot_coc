@@ -123,7 +123,7 @@ class TestBuildPrompt:
         assert "buildings" in prompt
         assert "JSON" in prompt
         assert "0-1279" in prompt
-        assert "0-719" in prompt
+        assert "0-749" in prompt
 
 
 class TestDashScopeClient:

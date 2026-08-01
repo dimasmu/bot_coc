@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
 MODEL = "qwen3.7-flash"
 SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+SCREEN_HEIGHT = 750  # allow slight overflow past 720 for bottom-edge UI elements
 VALID_RESOURCES = {"gold", "elixir", "dark_elixir"}
 MAX_BUILDINGS = 5
 
@@ -38,7 +38,7 @@ Return ONLY valid JSON (no markdown, no explanation):
 If nothing is upgradable: {"buildings": []}
 
 IMPORTANT RULES:
-- x and y MUST be integers in range 0-1279 and 0-719
+- x and y MUST be integers in range 0-1279 and 0-749
 - x,y must point to the CENTER of the green Upgrade button (not the building name)
 - cost MUST be an integer (no commas)
 - resource: "gold", "elixir", or "dark_elixir" """
@@ -59,7 +59,7 @@ Return ONLY valid JSON:
 }
 
 RULES:
-- x,y must be integers in range 0-1279 and 0-719
+- x,y must be integers in range 0-1279 and 0-749
 - x,y should point to the row center (name/icon area, NOT the upgrade button)
 - cost must be integer (no commas)
 - resource: "gold", "elixir", or "dark_elixir"
@@ -84,7 +84,7 @@ Return ONLY valid JSON:
 }
 
 RULES:
-- x,y must be integers in range 0-1279 and 0-719
+- x,y must be integers in range 0-1279 and 0-749
 - point to the EXACT center of the clickable upgrade button"""
 
 
