@@ -462,12 +462,12 @@ class SequenceRunner:
                     f"{_TPL_DIR}/btn_upgrade_confirm_2.png"]
 
     def _read_resources(self, screen) -> dict:
-        """OCR gold, elixir, and dark elixir from a screenshot."""
+        """OCR gold, elixir, and dark elixir from own base screen."""
         from backend.vision.ocr import read_number
         with get_session() as session:
-            gold_roi = session.query(RoiTemplate).filter_by(roi_name="gold_number").first()
-            elixir_roi = session.query(RoiTemplate).filter_by(roi_name="elixir_number").first()
-            de_roi = session.query(RoiTemplate).filter_by(roi_name="dark_elixir_number").first()
+            gold_roi = session.query(RoiTemplate).filter_by(roi_name="own_gold_number").first()
+            elixir_roi = session.query(RoiTemplate).filter_by(roi_name="own_elixir_number").first()
+            de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
         gold = gold_roi and read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
                                         gold_roi.width, gold_roi.height, roi_name=gold_roi.roi_name)
         elixir = elixir_roi and read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
