@@ -477,7 +477,7 @@ class SequenceRunner:
         return {"gold": gold or 0, "elixir": elixir or 0, "dark_elixir": de or 0}
 
     def _read_builder_count(self, screen) -> int:
-        """OCR free builder count from a screenshot. Returns 0 if OCR fails."""
+        """OCR free builder count from a screenshot. Capped at 6 (max in CoC)."""
         from backend.vision.ocr import read_number
         with get_session() as session:
             builder_roi = session.query(RoiTemplate).filter_by(roi_name="builder_count").first()
@@ -485,7 +485,12 @@ class SequenceRunner:
             return 0
         bc = read_number(screen, builder_roi.x_pos, builder_roi.y_pos,
                         builder_roi.width, builder_roi.height, roi_name="builder_count")
-        return bc if bc is not None else 0
+        if bc is None:
+            return 0
+        if bc > 6:  # OCR misread — max builders is 6
+            logger.warning("Builder count OCR returned %d (capped to 0 — recalibrate ROI)", bc)
+            return 0
+        return bc
 
     async def _evaluate_mode(self, adb) -> str:
         """Determine whether to farm or upgrade. Returns 'farming' or 'upgrade'."""
