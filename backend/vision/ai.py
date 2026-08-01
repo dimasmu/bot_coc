@@ -161,6 +161,7 @@ class DashScopeClient:
         }]
 
         try:
+            logger.info("AI calling DashScope (qwen3.7-flash)...")
             response = dashscope.MultiModalConversation.call(
                 api_key=self._api_key,
                 model=MODEL,

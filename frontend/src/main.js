@@ -96,6 +96,13 @@ document.addEventListener("alpine:init", () => {
       this.loadFarmingConfig();
       this.loadAnalytics();
       this.connectLogs();
+
+      // Re-send log filter to server when user changes tab
+      this.$watch('logFilter', (filter) => {
+        if (this.wsLogs && this.wsLogs.readyState === WebSocket.OPEN) {
+          this.wsLogs.send(JSON.stringify({ filter }));
+        }
+      });
       this.loadRois();
       this.connectBotStatus();
       this.loadSequences();
