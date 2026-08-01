@@ -605,40 +605,48 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(0.5, 1.0)
 
-        # Phase 2: AI find upgrade button in building info panel
+        # Phase 2: Template match hammer button on base
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        logger.info("AI-2: scanning base for upgrade button...")
-        base_result = client.analyze_screenshot(screen, prompt_override=BASE_PROMPT)
-
-        if base_result:
-            btn = base_result[0]
-            logger.info("Upgrade button at (%d,%d)", btn["x"], btn["y"])
-            await human_tap(adb, btn["x"], btn["y"], sigma=3)
+        from backend.vision.matching import match_template
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.4)
+        if hammer_pos:
+            logger.info("Hammer found at (%d,%d)", hammer_pos[0], hammer_pos[1])
+            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+            await human_delay(1.0, 2.0)
         else:
-            logger.warning("No upgrade button found")
+            logger.warning("Hammer not found — cannot upgrade")
             self._upgrade_target = None
             return
-        await human_delay(1.0, 2.0)
 
-        # Phase 3: Confirm
+        # Phase 3: Template match confirm button
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        with get_session() as session:
-            confirm_roi = session.query(RoiTemplate).filter_by(roi_name="btn_confirm_upgrade").first()
-        if confirm_roi:
-            cx = confirm_roi.x_pos + confirm_roi.width // 2
-            cy = confirm_roi.y_pos + confirm_roi.height // 2
-            await human_tap(adb, cx, cy, sigma=3)
+        confirm_pos = None
+        for tpl_path in self._TPL_CONFIRM:
+            confirm_pos = match_template(screen, tpl_path, threshold=0.5)
+            if confirm_pos:
+                break
+        if confirm_pos:
+            await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
             await human_delay(0.5, 1.0)
         else:
-            logger.warning("btn_confirm_upgrade ROI not calibrated")
-            self._upgrade_target = None
-            return
+            # Fallback to calibrated ROI
+            with get_session() as session:
+                confirm_roi = session.query(RoiTemplate).filter_by(roi_name="btn_confirm_upgrade").first()
+            if confirm_roi:
+                cx = confirm_roi.x_pos + confirm_roi.width // 2
+                cy = confirm_roi.y_pos + confirm_roi.height // 2
+                await human_tap(adb, cx, cy, sigma=3)
+                await human_delay(0.5, 1.0)
+            else:
+                logger.warning("Confirm button not found")
+                self._upgrade_target = None
+                return
 
         logger.info("Upgrade started: %s (cost=%d %s)",
                      bld["name"], bld["cost"], bld["resource"])
