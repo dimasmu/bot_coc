@@ -542,7 +542,7 @@ class SequenceRunner:
         """Two-AI-call: select building in menu, find upgrade button on base, confirm."""
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate
-        from backend.vision.ai import MENU_PROMPT, BASE_PROMPT
+        from backend.vision.ai import MENU_PROMPT
 
         target = getattr(self, "_upgrade_target", None) or {}
         resources = target.get("resources", {"gold": 0, "elixir": 0, "dark_elixir": 0})
@@ -605,22 +605,20 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(0.5, 1.0)
 
-        # Phase 2: AI find upgrade button on base
+        # Phase 2: Find upgrade button on base (template match + fallback)
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        logger.info("AI-2: scanning base for upgrade button...")
-        base_result = client.analyze_screenshot(screen, prompt_override=BASE_PROMPT)
-
-        if not base_result:
-            logger.warning("No upgrade button found")
-            self._upgrade_target = None
-            return
-
-        btn = base_result[0]
-        logger.info("Tap upgrade btn: (%d,%d)", btn["x"], btn["y"])
-        await human_tap(adb, btn["x"], btn["y"], sigma=3)
+        from backend.vision.matching import match_template
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.4)
+        if hammer_pos:
+            logger.info("Hammer found at (%d,%d)", hammer_pos[0], hammer_pos[1])
+            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+        else:
+            # Fallback: tap info panel area (top-right, where upgrade button usually is)
+            logger.info("Hammer not found, using fallback (750, 150)")
+            await human_tap(adb, 750, 150, sigma=10)
         await human_delay(1.0, 2.0)
 
         # Phase 3: Confirm
