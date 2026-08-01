@@ -21,15 +21,18 @@ def _build_prompt() -> str:
     return """You are a Clash of Clans bot assistant. Analyze this screenshot (1280x720).
 This is the "Builder Suggestions" menu after pressing the builder button.
 
-Find all buildings that have an "Upgrade" button (green text with a cost).
+Find all buildings listed in this menu that can be upgraded.
 For each upgradable building, provide the EXACT pixel coordinates of
-its "Upgrade" button.
+the BUILDING ITSELF (the building name or icon row, NOT the Upgrade button).
+
+The coordinates will be used to click the building row to select it.
+After selecting and closing the menu, the upgrade hammer will appear on screen.
 
 Return ONLY valid JSON (no markdown, no explanation):
 
 {
   "buildings": [
-    {"name": "Archer Tower", "x": 450, "y": 320, "cost": 800000, "resource": "gold"}
+    {"name": "Archer Tower", "x": 350, "y": 220, "cost": 800000, "resource": "gold"}
   ]
 }
 
@@ -37,6 +40,7 @@ If nothing is upgradable: {"buildings": []}
 
 IMPORTANT RULES:
 - x and y MUST be integers in range 0-1279 and 0-719
+- x,y should point to the BUILDING ROW (name/icon area, left-center of row)
 - cost MUST be an integer (no commas)
 - resource: "gold", "elixir", or "dark_elixir" """
 
