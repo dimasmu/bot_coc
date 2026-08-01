@@ -294,10 +294,10 @@
         <div class="space-y-1 mb-3" id="stepList">
           <template x-for="(step, idx) in selectedSequence?.steps || []" :key="idx">
             <div class="flex items-center gap-2 bg-slate-800 rounded border border-slate-700 p-2 text-xs"
-              :class="step.step_type === 'search' ? 'border-yellow-700' : step.step_type === 'attack' ? 'border-red-700' : ''">
+              :class="step.step_type === 'search' ? 'border-yellow-700' : step.step_type === 'attack' ? 'border-red-700' : step.step_type === 'upgrade_check' ? 'border-purple-700' : step.step_type === 'upgrade_execute' ? 'border-purple-700' : ''">
               <span class="text-slate-500 w-6" x-text="idx+1"></span>
               <span class="w-16 font-mono"
-                :class="step.step_type === 'tap' ? 'text-green-400' : step.step_type === 'search' ? 'text-yellow-400' : step.step_type === 'attack' ? 'text-red-400' : 'text-blue-400'"
+                :class="step.step_type === 'tap' ? 'text-green-400' : step.step_type === 'search' ? 'text-yellow-400' : step.step_type === 'attack' ? 'text-red-400' : step.step_type === 'upgrade_check' ? 'text-purple-400' : step.step_type === 'upgrade_execute' ? 'text-purple-400' : 'text-blue-400'"
                 x-text="step.step_type"></span>
               <span class="text-slate-400" x-text="step.roi_name || (step.duration ? step.duration+'s' : '')"></span>
               <div class="ml-auto flex gap-1">
@@ -315,6 +315,8 @@
             <option value="search">Search</option>
             <option value="attack">Attack</option>
             <option value="return_home">Return Home</option>
+            <option value="upgrade_check">Upgrade Check</option>
+            <option value="upgrade_execute">Upgrade Execute</option>
           </select>
           <select x-model="newStepRoi" class="bg-slate-800 border border-slate-600 rounded-md px-2.5 py-1.5 text-xs text-slate-200 w-44 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-colors" x-show="newStepType==='tap'">
             <option value="" class="text-slate-500">Select ROI...</option>
