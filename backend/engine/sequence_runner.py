@@ -615,7 +615,7 @@ class SequenceRunner:
         if not screen:
             self._upgrade_target = None
             return
-        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.7)
+        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.6)
         if sug_pos:
             await human_tap(adb, sug_pos[0], sug_pos[1] + 60, sigma=5)
             logger.info("Tapped suggested upgrade at (%d,%d)", sug_pos[0], sug_pos[1] + 60)
@@ -635,7 +635,7 @@ class SequenceRunner:
         if not screen:
             self._upgrade_target = None
             return
-        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.6)
         if hammer_pos:
             await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
             await human_delay(1.0, 2.0)
@@ -701,7 +701,7 @@ class SequenceRunner:
         screen = await adb.screencap()
         if not screen:
             return
-        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.7)
+        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.6)
         if not sug_pos:
             logger.warning("Suggested Upgrades text not found")
             # Close builder menu and bail
@@ -723,7 +723,7 @@ class SequenceRunner:
         screen = await adb.screencap()
         if not screen:
             return
-        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.6)
         if not hammer_pos:
             logger.warning("Hammer upgrade button not found — trying to dismiss popup first")
             # Maybe still on suggestion panel — tap away and retry
@@ -731,7 +731,7 @@ class SequenceRunner:
             await human_delay(0.5, 1.0)
             screen = await adb.screencap()
             if screen:
-                hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
+                hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.6)
         if hammer_pos:
             await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
             await human_delay(1.0, 2.0)
@@ -757,7 +757,7 @@ class SequenceRunner:
             return
         confirm_pos = None
         for tpl_path in self._TPL_CONFIRM:
-            confirm_pos = match_template(screen, tpl_path, threshold=0.7)
+            confirm_pos = match_template(screen, tpl_path, threshold=0.6)
             if confirm_pos:
                 logger.debug("Matched confirm template: %s", tpl_path)
                 break
@@ -783,7 +783,7 @@ class SequenceRunner:
         while self._running:
             await asyncio.sleep(3)
             screen = await adb.screencap()
-            if screen and not match_template(screen, TPL_COUNTDOWN, threshold=0.7):
+            if screen and not match_template(screen, TPL_COUNTDOWN, threshold=0.6):
                 logger.info("Countdown disappeared — battle over")
                 return
 
@@ -799,7 +799,7 @@ class SequenceRunner:
         for attempt in range(1, MAX_POLLS + 1):
             screen = await adb.screencap()
             if screen:
-                pos = match_template(screen, TPL, threshold=0.7)
+                pos = match_template(screen, TPL, threshold=0.6)
                 if pos:
                     await human_tap(adb, pos[0], pos[1], sigma=10)
                     logger.info("Return home button found and tapped at (%d,%d) (attempt %d)",
