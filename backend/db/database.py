@@ -52,6 +52,9 @@ def init_db():
         ("de_number", "read", 22, 164, 150, 43),
         ("btn_return_home", "tap", 50, 580, 160, 100),
         ("btn_surrender", "tap", 80, 660, 100, 50),
+        ("builder_menu", "tap", 70, 575, 100, 80),
+        ("upgrade_cost", "read", 340, 310, 120, 35),
+        ("builder_count", "read", 10, 550, 35, 30),
     ]
     with Session(engine) as session:
         for name, rtype, x, y, w, h in roi_defaults:
