@@ -593,7 +593,7 @@ class SequenceRunner:
         from backend.vision.ocr import find_text
         suggested_pos = find_text(screen, "Suggested")
         if suggested_pos:
-            tap_x, tap_y = suggested_pos[0], suggested_pos[1] + 80
+            tap_x, tap_y = suggested_pos[0], suggested_pos[1] + 60
             logger.info("OCR found Suggested at (%d,%d), tapping at (%d,%d)",
                          suggested_pos[0], suggested_pos[1], tap_x, tap_y)
         else:

@@ -144,7 +144,7 @@ def _parse_response(raw_text: str) -> list[dict] | None:
         else:
             cost = 0
 
-        resource = b.get("resource", "")
+        resource = b.get("resource", "").replace("dark-elixir", "dark_elixir").replace("-", "_")
         if resource not in VALID_RESOURCES:
             logger.warning("Unknown resource '%s', defaulting to 'gold'", resource)
             resource = "gold"
