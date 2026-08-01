@@ -59,6 +59,7 @@ from backend.api.rest_config import router as config_router
 from backend.api.rest_analytics import router as analytics_router
 from backend.api.ws_logs import router as logs_router
 from backend.api.rest_sequence import router as sequence_router
+from backend.api.rest_upgrade import router as upgrade_router
 
 app.include_router(screen_router)
 app.include_router(adb_router)
@@ -68,6 +69,7 @@ app.include_router(config_router)
 app.include_router(analytics_router)
 app.include_router(logs_router)
 app.include_router(sequence_router)
+app.include_router(upgrade_router)
 
 
 @app.get("/api/v1/health")
