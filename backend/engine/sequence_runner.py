@@ -307,8 +307,7 @@ class SequenceRunner:
         cards = await self._detect_cards(adb)
 
         if not cards:
-            logger.warning("No cards detected, cannot deploy")
-            await asyncio.sleep(duration)
+            logger.warning("No cards detected — returning home")
             return
 
         # Hardcoded deploy zone centers (from user's calibrated deploy_1..deploy_9)
@@ -323,7 +322,8 @@ class SequenceRunner:
         logger.info("Detected %d cards", len(cards))
 
         # Timer starts at first deploy, not function entry
-        end_time = None  # set on first actual deployment
+        end_time = None     # set on first actual deployment
+        deployed = False     # True once at least one card is deployed
 
         while self._running and (end_time is None or time.time() < end_time):
             active = [i for i in range(len(cards)) if i not in depleted]
@@ -351,6 +351,7 @@ class SequenceRunner:
                     logger.info("Attack timer started: %ds from first deploy", duration)
 
                 # Deploy
+                deployed = True
                 await human_tap(adb, cx, cy, sigma=2)
                 logger.info("  Card %d at (%d,%d): deploying", i + 1, cx, cy)
                 for _ in range(10):
@@ -359,9 +360,12 @@ class SequenceRunner:
                     await human_delay(0.005, 0.01)
                 await human_delay(0.05, 0.15)
 
-        remaining = max(0, (end_time or (time.time() + duration)) - time.time() - 5)
-        if remaining > 0:
-            await self._poll_return_home(adb, remaining)
+        if deployed:
+            remaining = max(0, end_time - time.time() - 5)
+            if remaining > 0:
+                await self._poll_return_home(adb, remaining)
+        else:
+            logger.info("No cards deployed — battle ended early, returning home")
 
     async def _do_upgrade_check(self, adb):
         """Check upgrade queue for affordable upgrades with available builders."""
