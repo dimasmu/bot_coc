@@ -20,26 +20,26 @@ def _build_prompt() -> str:
     """Build the strict JSON-output prompt for building/button detection."""
     return """You are a Clash of Clans bot assistant. Analyze this Clash of Clans screenshot (1280x720).
 
-Find ALL visible upgrade-related elements:
-- If this is a Builder Suggestions menu: find upgradable building rows
-- If this is the base view with a selected building: find the Upgrade button (it may look like a hammer, cogwheel/gear icon, or green button with cost)
+This is the Builder Suggestions menu after pressing the builder button.
+Find all buildings that have an "Upgrade" button (green text showing a cost like "1,000,000" or similar).
 
-For each element found, provide its exact pixel coordinates.
+For each upgradable building, provide the EXACT pixel coordinates of its
+UPGRADE BUTTON (the green button with the cost text). This is what we need
+to click to start the upgrade.
 
 Return ONLY valid JSON (no markdown, no explanation):
 
 {
   "buildings": [
-    {"name": "Archer Tower", "x": 350, "y": 220, "cost": 800000, "resource": "gold"}
+    {"name": "Archer Tower", "x": 450, "y": 320, "cost": 800000, "resource": "gold"}
   ]
 }
 
-If nothing is found: {"buildings": []}
+If nothing is upgradable: {"buildings": []}
 
 IMPORTANT RULES:
 - x and y MUST be integers in range 0-1279 and 0-719
-- For menu: x,y should point to the building row center
-- For base: x,y should point to the upgrade button center
+- x,y must point to the CENTER of the green Upgrade button (not the building name)
 - cost MUST be an integer (no commas)
 - resource: "gold", "elixir", or "dark_elixir" """
 
