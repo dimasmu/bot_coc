@@ -89,7 +89,11 @@ class SequenceRunner:
                 .order_by(SequenceStep.step_order)
             ).all()
 
-        current_mode = "farming"
+        # Respect user's sequence selection for initial mode
+        if sequence_id and sequence_id == upgrade_seq.id:
+            current_mode = "upgrade"
+        else:
+            current_mode = "farming"
 
         while self._running:
             self.state = "RUNNING"
