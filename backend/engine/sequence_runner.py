@@ -709,34 +709,17 @@ class SequenceRunner:
         await human_delay(1.0, 2.0)
 
     async def _poll_countdown_then_return(self, adb):
-        """Poll countdown timer; when it disappears, tap return home."""
+        """Poll countdown timer; when it disappears, battle is over."""
         from backend.vision.matching import match_template
         TPL_COUNTDOWN = f"{self._TPL_DIR}/btn_countdown.png"
-        TPL_HOME = f"{self._TPL_DIR}/btn_return_home.png"
 
-        # Phase 1: wait for countdown to disappear (battle in progress)
         logger.info("Watching countdown timer...")
         while self._running:
             await asyncio.sleep(3)
             screen = await adb.screencap()
             if screen and not match_template(screen, TPL_COUNTDOWN, threshold=0.7):
                 logger.info("Countdown disappeared — battle over")
-                break
-
-        # Phase 2: poll for return home button
-        logger.info("Polling for return home button...")
-        for _ in range(20):  # max 60s
-            if not self._running:
                 return
-            await asyncio.sleep(3)
-            screen = await adb.screencap()
-            if screen:
-                pos = match_template(screen, TPL_HOME, threshold=0.7)
-                if pos:
-                    await human_tap(adb, pos[0], pos[1], sigma=10)
-                    logger.info("Return home tapped at (%d,%d)", pos[0], pos[1])
-                    return
-        logger.info("Return home not found")
 
     async def _do_return_home(self, adb):
         from backend.vision.matching import match_template
