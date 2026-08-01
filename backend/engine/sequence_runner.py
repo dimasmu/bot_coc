@@ -28,6 +28,7 @@ class SequenceRunner:
         self.dark_elixir_earned = 0
         self.raids_completed = 0
         self._upgrade_item = None  # holds selected UpgradeQueue item between check/execute
+        self._ai_client = None  # lazy-init DashScope client
 
     @property
     def is_running(self):
@@ -175,8 +176,9 @@ class SequenceRunner:
     async def _detect_cards(self, adb):
         """Scan the troop bar to find all active cards using calibrated positions.
 
-        Card positions hardcoded from card_1..card_11 calibrations.
-        Filters empty slots (dashed border, transparent, no card texture).
+        Starts from 11 hardcoded card_1..card_11 positions, then extends
+        left (card_0, card_-1, ...) and right (card_12, card_13, ...)
+        dynamically as long as non-depleted cards are found.
         """
         screen = await adb.screencap()
         if not screen:
@@ -188,28 +190,52 @@ class SequenceRunner:
 
         bar_top = max(0, h - 180)
         bar = img[bar_top:h, 0:w]
+        card_w, card_h = 60, 85
+        spacing = (self._CARD_X_POSITIONS[-1] - self._CARD_X_POSITIONS[0]) // (len(self._CARD_X_POSITIONS) - 1)
 
         cards = []
-        card_w, card_h = 60, 85
+        detected = set()
 
-        for scan_x in self._CARD_X_POSITIONS:
+        def _check_slot(scan_x):
+            """Check if there's a card at scan_x. Returns True if card found."""
+            if scan_x < 0 or scan_x >= w:
+                return False
             x1 = max(0, scan_x - card_w // 2)
             y1 = bar.shape[0] - card_h
             x2 = min(w, x1 + card_w)
             if x2 <= x1:
-                continue
-
+                return False
             region = bar[y1:, x1:x2]
-            # Empty slots: transparent, dashed border → very low texture
             if np.std(region) < 20:
-                continue
-
-            cards.append({
-                "x": scan_x,
-                "y": bar_top + y1 + card_h // 2,
-                "card_top": bar_top + y1,
-            })
+                return False
+            if scan_x in detected:
+                return False
+            detected.add(scan_x)
+            cards.append({"x": scan_x, "y": bar_top + y1 + card_h // 2, "card_top": bar_top + y1})
             logger.info("  Card at X=%d", scan_x)
+            return True
+
+        # Scan core 11 positions
+        for scan_x in self._CARD_X_POSITIONS:
+            _check_slot(scan_x)
+
+        # Extend LEFT: check for cards before card_1
+        left_x = self._CARD_X_POSITIONS[0] - spacing
+        for _ in range(3):  # up to 3 extra cards left
+            if left_x < 0:
+                break
+            if not _check_slot(left_x):
+                break  # stop at first empty slot
+            left_x -= spacing
+
+        # Extend RIGHT: check for cards after card_11
+        right_x = self._CARD_X_POSITIONS[-1] + spacing
+        for _ in range(3):  # up to 3 extra cards right
+            if right_x >= w:
+                break
+            if not _check_slot(right_x):
+                break  # stop at first empty slot
+            right_x += spacing
 
         return cards
 
@@ -296,15 +322,17 @@ class SequenceRunner:
 
         logger.info("Detected %d cards", len(cards))
 
-        end_time = time.time() + duration
-        while self._running and time.time() < end_time:
+        # Timer starts at first deploy, not function entry
+        end_time = None  # set on first actual deployment
+
+        while self._running and (end_time is None or time.time() < end_time):
             active = [i for i in range(len(cards)) if i not in depleted]
             if not active:
                 logger.info("All cards depleted — deployment complete")
                 break
 
             for i in active:
-                if not self._running or time.time() >= end_time:
+                if not self._running or (end_time is not None and time.time() >= end_time):
                     break
 
                 card = cards[i]
@@ -317,6 +345,11 @@ class SequenceRunner:
                                 i + 1, card["x"])
                     continue
 
+                # Start timer on first actual deploy
+                if end_time is None:
+                    end_time = time.time() + duration
+                    logger.info("Attack timer started: %ds from first deploy", duration)
+
                 # Deploy
                 await human_tap(adb, cx, cy, sigma=2)
                 logger.info("  Card %d at (%d,%d): deploying", i + 1, cx, cy)
@@ -326,8 +359,7 @@ class SequenceRunner:
                     await human_delay(0.005, 0.01)
                 await human_delay(0.05, 0.15)
 
-        # Reserve ~8s for _do_return_home so it runs within the 185s window
-        remaining = max(0, end_time - time.time() - 8)
+        remaining = max(0, (end_time or (time.time() + duration)) - time.time() - 5)
         if remaining > 0:
             logger.info("Waiting for battle (%.0fs, return home in ~8s)...", remaining)
             await asyncio.sleep(remaining)
@@ -410,11 +442,50 @@ class SequenceRunner:
         logger.info("No affordable upgrades found")
         self._upgrade_item = None
 
+    # Template paths for upgrade flow
+    _TPL_DIR = "storage/templates"
+    _TPL_SUGGESTION = f"{_TPL_DIR}/btn_upgrade_suggestion.png"
+    _TPL_HAMMER = f"{_TPL_DIR}/btn_upgrade_hammer.png"
+    _TPL_CONFIRM = [f"{_TPL_DIR}/btn_upgrade_confirm_1.png",
+                    f"{_TPL_DIR}/btn_upgrade_confirm_2.png"]
+
+    def _get_ai_client(self):
+        """Lazy-init the DashScope client from DB config."""
+        if self._ai_client is not None:
+            return self._ai_client
+        from backend.vision.ai import DashScopeClient
+        with get_session() as session:
+            cfg = session.query(Config).filter_by(key="dashscope_api_key").first()
+        api_key = cfg.value.strip() if cfg and cfg.value else None
+        self._ai_client = DashScopeClient(api_key=api_key)
+        if self._ai_client.available:
+            logger.info("DashScope AI client initialized")
+        else:
+            logger.info("DashScope API key not configured — AI disabled")
+        return self._ai_client
+
+    def _save_debug_screenshot(self, png_bytes: bytes):
+        """Save screenshot to storage/debug/ if debug flag is set."""
+        if not png_bytes:
+            return
+        with get_session() as session:
+            cfg = session.query(Config).filter_by(key="dashscope_debug_screenshots").first()
+        if not cfg or cfg.value.lower() != "true":
+            return
+        import os
+        os.makedirs("storage/debug", exist_ok=True)
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = f"storage/debug/ai_upgrade_{ts}.png"
+        with open(filepath, "wb") as f:
+            f.write(png_bytes)
+        logger.debug("Debug screenshot saved: %s", filepath)
+
     async def _do_upgrade_execute(self, adb):
-        """Execute the upgrade selected by _do_upgrade_check."""
+        """Execute upgrade: try AI vision first, fall back to template matching."""
         from backend.db.database import get_session
         from backend.db.models import UpgradeQueue, RoiTemplate
-        from backend.vision.ocr import read_number
+        from backend.vision.matching import match_template
         from datetime import datetime
 
         if not getattr(self, "_upgrade_item", None):
@@ -425,52 +496,192 @@ class SequenceRunner:
         self.state = "UPGRADING"
         logger.info("Executing upgrade: %s lvl %d", item.name, item.target_level)
 
+        # Step 1: Tap builder menu (from calibrated ROI)
+        with get_session() as session:
+            menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
+        if not menu_roi:
+            logger.warning("builder_menu ROI not calibrated")
+            self._upgrade_item = None
+            return
+        menu_cx = menu_roi.x_pos + menu_roi.width // 2
+        menu_cy = menu_roi.y_pos + menu_roi.height // 2
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(1.5, 2.5)
+
+        # Step 2: Screencap
         screen = await adb.screencap()
         if not screen:
             return
 
-        # Tap builder menu button
+        # Save debug screenshot if enabled
+        self._save_debug_screenshot(screen)
+
+        # Step 3: Try AI analysis
+        client = self._get_ai_client()
+        if not client.available:
+            logger.warning("AI client unavailable — falling back to template matching")
+            await self._do_upgrade_execute_template(adb)
+            return
+
+        ai_buildings = client.analyze_screenshot(screen)
+
+        if ai_buildings is None:
+            logger.warning("AI analysis failed — falling back to template matching")
+            await self._do_upgrade_execute_template(adb)
+            return
+
+        if not ai_buildings:
+            logger.info("AI: no upgradable buildings found in builder menu")
+            # Close builder menu
+            await human_tap(adb, menu_cx, menu_cy, sigma=3)
+            await human_delay(0.3, 0.8)
+            self._upgrade_item = None
+            return
+
+        # Step 4: Pick first building and tap its Upgrade button
+        building = ai_buildings[0]
+        logger.info("AI detected: %s at (%d, %d) cost=%d %s",
+                     building["name"], building["x"], building["y"],
+                     building["cost"], building["resource"])
+
+        await human_tap(adb, building["x"], building["y"], sigma=3)
+        await human_delay(0.8, 1.5)
+
+        # Step 5: Find and tap confirm button (template matching)
+        screen = await adb.screencap()
+        if not screen:
+            return
+        confirm_pos = None
+        for tpl_path in self._TPL_CONFIRM:
+            confirm_pos = match_template(screen, tpl_path, threshold=0.7)
+            if confirm_pos:
+                break
+        if confirm_pos:
+            await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
+            await human_delay(0.5, 1.0)
+        else:
+            logger.warning("Confirm button not found after AI upgrade tap")
+            self._upgrade_item = None
+            return
+
+        # Step 6: Update DB
+        with get_session() as session:
+            db_item = session.query(UpgradeQueue).get(item.id)
+            if db_item:
+                db_item.status = "IN_PROGRESS"
+                db_item.started_at = datetime.utcnow()
+                if building.get("cost"):
+                    db_item.cost = building["cost"]
+                session.commit()
+
+        logger.info("AI upgrade started: %s (cost=%d %s)",
+                     building["name"], building["cost"], building["resource"])
+        self._upgrade_item = None
+        await human_delay(1.0, 2.0)
+
+    async def _do_upgrade_execute_template(self, adb):
+        """Fallback: execute upgrade using template matching (original logic)."""
+        from backend.db.database import get_session
+        from backend.db.models import UpgradeQueue, RoiTemplate
+        from backend.vision.ocr import read_number
+        from backend.vision.matching import match_template
+        from datetime import datetime
+
+        if not getattr(self, "_upgrade_item", None):
+            logger.info("No upgrade item selected — skipping")
+            return
+
+        item = self._upgrade_item
+        self.state = "UPGRADING"
+        logger.info("Executing upgrade: %s lvl %d", item.name, item.target_level)
+
+        TPL_DIR = self._TPL_DIR
+
+        # Step 1: Tap builder menu (from calibrated ROI)
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
+        if not menu_roi:
+            logger.warning("builder_menu ROI not calibrated")
+            self._upgrade_item = None
+            return
+        menu_cx = menu_roi.x_pos + menu_roi.width // 2
+        menu_cy = menu_roi.y_pos + menu_roi.height // 2
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(1.5, 2.5)
 
-        if menu_roi:
-            cx = menu_roi.x_pos + menu_roi.width // 2
-            cy = menu_roi.y_pos + menu_roi.height // 2
-            await human_tap(adb, cx, cy, sigma=5)
+        # Step 2: Find "Suggested Upgrades" text → tap directly below it
+        screen = await adb.screencap()
+        if not screen:
+            return
+        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.7)
+        if not sug_pos:
+            logger.warning("Suggested Upgrades text not found")
+            # Close builder menu and bail
+            await human_tap(adb, menu_cx, menu_cy, sigma=3)
+            self._upgrade_item = None
+            return
+
+        # Tap ~60px below the label center to hit first suggestion item
+        suggestion_tap_x = sug_pos[0]
+        suggestion_tap_y = sug_pos[1] + 60
+        await human_tap(adb, suggestion_tap_x, suggestion_tap_y, sigma=5)
+        await human_delay(0.8, 1.5)
+
+        # Step 3: Close builder menu to reveal the hammer button
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(1.0, 1.5)
+
+        # Step 4: Find and tap the hammer button
+        screen = await adb.screencap()
+        if not screen:
+            return
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
+        if not hammer_pos:
+            logger.warning("Hammer upgrade button not found — trying to dismiss popup first")
+            # Maybe still on suggestion panel — tap away and retry
+            await human_tap(adb, 640, 360, sigma=40)
+            await human_delay(0.5, 1.0)
+            screen = await adb.screencap()
+            if screen:
+                hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
+        if hammer_pos:
+            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
             await human_delay(1.0, 2.0)
+        else:
+            logger.warning("Hammer button still not found — skipping upgrade")
+            self._upgrade_item = None
+            return
 
-        # Read cost from upgrade screen
-        with get_session() as session:
-            cost_roi = session.query(RoiTemplate).filter_by(roi_name="upgrade_cost").first()
-
+        # Step 5: OCR upgrade cost from region below the hammer icon
+        screen = await adb.screencap()
         detected_cost = None
-        if cost_roi:
-            screen2 = await adb.screencap()
-            if screen2:
-                detected_cost = read_number(screen2, cost_roi.x_pos, cost_roi.y_pos,
-                                            cost_roi.width, cost_roi.height,
-                                            roi_name="upgrade_cost")
+        if screen and hammer_pos:
+            # Cost text sits ~20px below the hammer icon, ~60px wide
+            cost_x = hammer_pos[0] - 30
+            cost_y = hammer_pos[1] + 45
+            detected_cost = read_number(screen, cost_x, cost_y, 60, 25,
+                                        roi_name="hammer_cost")
         logger.info("Detected upgrade cost: %s", detected_cost)
 
-        # Tap upgrade button
-        with get_session() as session:
-            btn_upgrade = session.query(RoiTemplate).filter_by(roi_name="btn_upgrade").first()
-        if btn_upgrade:
-            cx = btn_upgrade.x_pos + btn_upgrade.width // 2
-            cy = btn_upgrade.y_pos + btn_upgrade.height // 2
-            await human_tap(adb, cx, cy, sigma=3)
+        # Step 6: Find and tap confirm button (try both variants)
+        screen = await adb.screencap()
+        if not screen:
+            return
+        confirm_pos = None
+        for tpl_path in self._TPL_CONFIRM:
+            confirm_pos = match_template(screen, tpl_path, threshold=0.7)
+            if confirm_pos:
+                logger.debug("Matched confirm template: %s", tpl_path)
+                break
+        if confirm_pos:
+            await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
             await human_delay(0.5, 1.0)
+        else:
+            logger.warning("Confirm button not found")
+            self._upgrade_item = None
+            return
 
-        # Tap confirm button
-        with get_session() as session:
-            btn_confirm = session.query(RoiTemplate).filter_by(roi_name="btn_upgrade_confirm").first()
-        if btn_confirm:
-            cx = btn_confirm.x_pos + btn_confirm.width // 2
-            cy = btn_confirm.y_pos + btn_confirm.height // 2
-            await human_tap(adb, cx, cy, sigma=3)
-            await human_delay(0.5, 1.0)
-
-        # Update DB
+        # Step 7: Update DB
         with get_session() as session:
             db_item = session.query(UpgradeQueue).get(item.id)
             if db_item:
@@ -486,19 +697,38 @@ class SequenceRunner:
         await human_delay(1.0, 2.0)
 
     async def _do_return_home(self, adb):
+        from backend.vision.matching import match_template
+
         self.state = "RETURNING"
-        logger.info("Returning home...")
-        await human_delay(3.0, 5.0)
+        logger.info("Returning home — polling for button...")
 
-        with get_session() as session:
-            home_roi = session.query(RoiTemplate).filter_by(roi_name="btn_return_home").first()
+        TPL = f"{self._TPL_DIR}/btn_return_home.png"
+        MAX_POLLS = 15  # 15 × 5s = 75s max wait
 
-        if home_roi:
-            cx = home_roi.x_pos + home_roi.width // 2
-            cy = home_roi.y_pos + home_roi.height // 2
-            await human_tap(adb, cx, cy, sigma=10)
+        for attempt in range(1, MAX_POLLS + 1):
+            screen = await adb.screencap()
+            if screen:
+                pos = match_template(screen, TPL, threshold=0.7)
+                if pos:
+                    await human_tap(adb, pos[0], pos[1], sigma=10)
+                    logger.info("Return home button found and tapped at (%d,%d) (attempt %d)",
+                                pos[0], pos[1], attempt)
+                    break
+            logger.debug("Return home button not yet visible (attempt %d/%d), waiting 5s...",
+                         attempt, MAX_POLLS)
+            await asyncio.sleep(5)
         else:
-            await human_tap(adb, 640, 650, sigma=20)
+            # Fallback: calibrated ROI or center-bottom
+            logger.warning("Return home button not found after %ds, using fallback", MAX_POLLS * 5)
+            with get_session() as session:
+                from backend.db.models import RoiTemplate
+                home_roi = session.query(RoiTemplate).filter_by(roi_name="btn_return_home").first()
+            if home_roi:
+                cx = home_roi.x_pos + home_roi.width // 2
+                cy = home_roi.y_pos + home_roi.height // 2
+                await human_tap(adb, cx, cy, sigma=20)
+            else:
+                await human_tap(adb, 640, 650, sigma=20)
 
         await human_delay(3.0, 5.0)
 
