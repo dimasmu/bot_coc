@@ -12,7 +12,14 @@ dependencies = [
     "aiosqlite>=0.20",
     "pydantic-settings>=2.0",
     "pillow>=11.0",
+    "dashscope",
 ]
 
 [project.scripts]
 coc-bot = "backend.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
