@@ -47,22 +47,22 @@ IMPORTANT RULES:
 MENU_PROMPT = """You are a Clash of Clans bot assistant. Analyze this screenshot (1280x720).
 This is the Builder Suggestions menu.
 
-Find the first building under "Suggested Upgrades" that has a green UPGRADE button
-(showing a cost like "1,000,000" next to a gold/elixir/dark-elixir icon).
-
-Return the EXACT pixel coordinates of the UPGRADE BUTTON ITSELF (the green clickable
-button area with the cost text). This is what we will click to start upgrading.
+Find the first building listed under "Suggested Upgrades".
+For this building, provide the pixel coordinates of its BUILDING ROW
+(the area with the building name and icon on the LEFT side of the row).
+We will click this row to select the building. After closing the menu,
+the upgrade hammer will appear at the building's location on the base.
 
 Return ONLY valid JSON:
 {
   "buildings": [
-    {"name": "Archer Tower", "x": 600, "y": 385, "cost": 800000, "resource": "gold"}
+    {"name": "Archer Tower", "x": 440, "y": 385, "cost": 800000, "resource": "gold"}
   ]
 }
 
 RULES:
 - x,y must be integers in range 0-1279 and 0-749
-- Point to the CENTER of the green Upgrade button area (clickable zone)
+- x,y should point to the row center (building name area, left side of list)
 - cost must be integer (no commas)
 - resource: "gold", "elixir", or "dark_elixir" """
 

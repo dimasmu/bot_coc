@@ -539,10 +539,10 @@ class SequenceRunner:
         logger.debug("Debug screenshot saved: %s", filepath)
 
     async def _do_upgrade_execute(self, adb):
-        """Single-AI-call upgrade: find UPGRADE BUTTON in menu, tap, confirm."""
+        """Two-AI-call: select building in menu, find upgrade button on base, confirm."""
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate
-        from backend.vision.ai import MENU_PROMPT
+        from backend.vision.ai import MENU_PROMPT, BASE_PROMPT
 
         target = getattr(self, "_upgrade_target", None) or {}
         resources = target.get("resources", {"gold": 0, "elixir": 0, "dark_elixir": 0})
@@ -558,11 +558,10 @@ class SequenceRunner:
         menu_cx = menu_roi.x_pos + menu_roi.width // 2
         menu_cy = menu_roi.y_pos + menu_roi.height // 2
 
-        # Open menu
+        # Phase 1: Open menu, AI find first suggested building row
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.5, 2.5)
 
-        # AI: find upgrade buttons in menu
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
@@ -571,30 +570,50 @@ class SequenceRunner:
         if not client.available:
             self._upgrade_target = None
             return
-        logger.info("AI: scanning builder menu...")
-        result = client.analyze_screenshot(screen, prompt_override=MENU_PROMPT)
+        logger.info("AI-1: scanning builder menu...")
+        menu_result = client.analyze_screenshot(screen, prompt_override=MENU_PROMPT)
 
-        if not result:
-            logger.info("No buildings found in menu")
+        if not menu_result:
+            logger.info("No buildings found")
             await human_tap(adb, menu_cx, menu_cy, sigma=3)
             self._upgrade_target = None
             return
 
-        building = result[0]
-        r = building.get("resource", "gold")
-        if resources.get(r, 0) < building.get("cost", 0):
+        bld = menu_result[0]
+        r = bld.get("resource", "gold")
+        if resources.get(r, 0) < bld.get("cost", 0):
             logger.info("Cannot afford %s (need %d %s, have %d)",
-                         building["name"], building["cost"], r, resources.get(r, 0))
+                         bld["name"], bld["cost"], r, resources.get(r, 0))
             await human_tap(adb, menu_cx, menu_cy, sigma=3)
             self._upgrade_target = None
             return
 
-        # Tap upgrade button directly in menu (opens upgrade panel)
-        logger.info("Tapping upgrade button: %s at (%d,%d)", building["name"], building["x"], building["y"])
-        await human_tap(adb, building["x"], building["y"], sigma=3)
+        # Tap building row then close menu
+        logger.info("Selecting: %s at (%d,%d)", bld["name"], bld["x"], bld["y"])
+        await human_tap(adb, bld["x"], bld["y"], sigma=5)
+        await human_delay(0.5, 1.0)
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(0.5, 1.0)
+
+        # Phase 2: AI find upgrade button on base
+        screen = await adb.screencap()
+        if not screen:
+            self._upgrade_target = None
+            return
+        logger.info("AI-2: scanning base for upgrade button...")
+        base_result = client.analyze_screenshot(screen, prompt_override=BASE_PROMPT)
+
+        if not base_result:
+            logger.warning("No upgrade button found")
+            self._upgrade_target = None
+            return
+
+        btn = base_result[0]
+        logger.info("Tap upgrade btn: (%d,%d)", btn["x"], btn["y"])
+        await human_tap(adb, btn["x"], btn["y"], sigma=3)
         await human_delay(1.0, 2.0)
 
-        # Tap confirm button via ROI
+        # Phase 3: Confirm
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
@@ -612,7 +631,7 @@ class SequenceRunner:
             return
 
         logger.info("Upgrade started: %s (cost=%d %s)",
-                     building["name"], building["cost"], building["resource"])
+                     bld["name"], bld["cost"], bld["resource"])
         self._upgrade_target = None
         await human_delay(1.0, 2.0)
 
