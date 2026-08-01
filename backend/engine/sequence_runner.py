@@ -400,6 +400,14 @@ class SequenceRunner:
 
         self._upgrade_target = None
 
+        # Read resources from clean base screen
+        screen = await adb.screencap()
+        if not screen:
+            return
+        resources = self._read_resources(screen)
+        logger.info("Resources: G=%d E=%d DE=%d",
+                     resources["gold"], resources["elixir"], resources["dark_elixir"])
+
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
         if not menu_roi:
@@ -410,8 +418,8 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.5, 2.5)
 
-        screen = await adb.screencap()
-        if not screen:
+        screen2 = await adb.screencap()
+        if not screen2:
             return
 
         client = self._get_ai_client()
@@ -421,7 +429,7 @@ class SequenceRunner:
             await human_delay(0.3, 0.8)
             return
 
-        ai_buildings = client.analyze_screenshot(screen)
+        ai_buildings = client.analyze_screenshot(screen2)
         if not ai_buildings:
             logger.info("No upgradable buildings found")
             await human_tap(adb, menu_cx, menu_cy, sigma=3)
@@ -432,7 +440,6 @@ class SequenceRunner:
         logger.info("Suggested: %s (%d %s)",
                      building["name"], building["cost"], building["resource"])
 
-        resources = self._read_resources(screen)
         res_val = resources.get(building.get("resource", "gold"), 0)
         if res_val < building.get("cost", 0):
             logger.info("Cannot afford %s (need %d %s, have %d)",
@@ -482,6 +489,9 @@ class SequenceRunner:
 
     async def _evaluate_mode(self, adb) -> str:
         """Determine whether to farm or upgrade. Returns 'farming' or 'upgrade'."""
+        # Wait for screen to stabilize after return_home
+        await human_delay(0.5, 1.0)
+
         screen = await adb.screencap()
         if not screen:
             return "farming"
@@ -495,11 +505,6 @@ class SequenceRunner:
         if not client.available:
             logger.info("AI not available — farming mode")
             return "farming"
-
-        resources = self._read_resources(screen)
-        logger.info("Resources: G=%d E=%d DE=%d, builders=%d",
-                     resources["gold"], resources["elixir"],
-                     resources["dark_elixir"], builders)
 
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
@@ -517,11 +522,19 @@ class SequenceRunner:
 
         ai_buildings = client.analyze_screenshot(screen2)
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
-        await human_delay(0.3, 0.8)
+        await human_delay(0.5, 1.0)
 
         if not ai_buildings:
             logger.info("No upgradable buildings found — farming mode")
             return "farming"
+
+        # Read resources from clean base screen (same method as search)
+        screen3 = await adb.screencap()
+        resources = self._read_resources(screen3) if screen3 else {"gold": 0, "elixir": 0, "dark_elixir": 0}
+
+        logger.info("Resources: G=%d E=%d DE=%d, builders=%d",
+                     resources["gold"], resources["elixir"],
+                     resources["dark_elixir"], builders)
 
         cheapest = ai_buildings[0]
         res_val = resources.get(cheapest.get("resource", "gold"), 0)
