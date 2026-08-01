@@ -1,3 +1,4 @@
+import 'preline';
 import Alpine from "alpinejs";
 import "./style.css";
 
@@ -71,6 +72,8 @@ document.addEventListener("alpine:init", () => {
     newStepType: "tap",
     newStepRoi: "",
     newStepDuration: "",
+    newSeqName: "",
+    roiSearch: "",
 
     // Farming config
     farmingConfig: {
@@ -80,6 +83,13 @@ document.addEventListener("alpine:init", () => {
       max_searches: 30,
       strategy: "4finger",
     },
+
+    // Builder tab
+    upgradeQueue: [],
+    newUpgradeName: "",
+    newUpgradeLevel: 1,
+    newUpgradeResource: "gold",
+    upgradeStatus: { pending: 0, in_progress: 0, completed: 0, total: 0 },
 
     init() {
       this.startFpsCounter();
@@ -640,8 +650,14 @@ document.addEventListener("alpine:init", () => {
       if (active) this.activeSequenceId = active.id;
       else if (this.sequences.length > 0) this.activeSequenceId = this.sequences[0].id;
 
+      // Preserve current selection across reloads (e.g., after save)
+      const currentId = this.selectedSequence?.id;
       if (this.sequences.length > 0) {
-        this.selectedSequence = this.sequences[0];
+        if (currentId) {
+          this.selectedSequence = this.sequences.find(s => s.id === currentId) || this.sequences[0];
+        } else {
+          this.selectedSequence = this.sequences[0];
+        }
         this.selectedSequence.steps = this.selectedSequence.steps || [];
       }
     },
@@ -697,8 +713,8 @@ document.addEventListener("alpine:init", () => {
       this.loadSequences();
     },
 
-    async newSequence() {
-      const name = prompt("Sequence name:", "My Sequence");
+    async createSequence() {
+      const name = this.newSeqName.trim();
       if (!name) return;
       const res = await fetch("/api/v1/sequences", {
         method: "POST",
@@ -706,6 +722,7 @@ document.addEventListener("alpine:init", () => {
         body: JSON.stringify({ name, description: "" }),
       });
       if (res.ok) {
+        this.newSeqName = "";
         await this.loadSequences();
         this.selectedSequence = this.sequences[this.sequences.length - 1];
         if (this.selectedSequence) this.selectedSequence.steps = [];
@@ -744,6 +761,59 @@ document.addEventListener("alpine:init", () => {
       if (tab === 'analytics') this.loadAnalytics();
       if (tab === 'logs') this.connectLogs();
       if (tab === 'calibrator' && this.adbStatus.connected) this.captureScreenshot();
+      if (tab === 'builder') {
+        this.loadUpgradeQueue();
+        this.loadUpgradeStatus();
+      }
+    },
+
+    // --- Builder / Upgrade Queue ---
+    async loadUpgradeQueue() {
+      const res = await fetch("/api/v1/upgrade/queue");
+      this.upgradeQueue = await res.json();
+    },
+    async loadUpgradeStatus() {
+      const res = await fetch("/api/v1/upgrade/status");
+      this.upgradeStatus = await res.json();
+    },
+    async addUpgradeItem() {
+      if (!this.newUpgradeName.trim()) return;
+      await fetch("/api/v1/upgrade/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: this.newUpgradeName.trim(),
+          target_level: parseInt(this.newUpgradeLevel) || 1,
+          resource_type: this.newUpgradeResource,
+          upgrade_type: "building",
+        }),
+      });
+      this.newUpgradeName = "";
+      this.newUpgradeLevel = 1;
+      this.newUpgradeResource = "gold";
+      await this.loadUpgradeQueue();
+      await this.loadUpgradeStatus();
+    },
+    async deleteUpgradeItem(id) {
+      await fetch(`/api/v1/upgrade/queue/${id}`, { method: "DELETE" });
+      await this.loadUpgradeQueue();
+      await this.loadUpgradeStatus();
+    },
+    async moveUpgradeItem(id, dir) {
+      const idx = this.upgradeQueue.findIndex(i => i.id === id);
+      if (idx < 0) return;
+      const target = idx + dir;
+      if (target < 0 || target >= this.upgradeQueue.length) return;
+      const a = this.upgradeQueue[idx], b = this.upgradeQueue[target];
+      await fetch(`/api/v1/upgrade/queue/${a.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority_order: b.priority_order }),
+      });
+      await fetch(`/api/v1/upgrade/queue/${b.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority_order: a.priority_order }),
+      });
+      await this.loadUpgradeQueue();
     },
   }));
 });
