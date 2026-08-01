@@ -361,11 +361,10 @@ class SequenceRunner:
                 await human_delay(0.05, 0.15)
 
         if deployed:
-            remaining = max(0, end_time - time.time() - 5)
-            if remaining > 0:
-                await self._poll_return_home(adb, remaining)
+            logger.info("Battle started — polling countdown timer...")
+            await self._poll_countdown_then_return(adb)
         else:
-            logger.info("No cards deployed — battle ended early, returning home")
+            logger.info("No cards deployed — returning home")
 
     async def _do_upgrade_check(self, adb):
         """Check upgrade queue for affordable upgrades with available builders."""
@@ -709,24 +708,35 @@ class SequenceRunner:
         self._upgrade_item = None
         await human_delay(1.0, 2.0)
 
-    async def _poll_return_home(self, adb, timeout: float):
-        """Poll for return home button during battle wait, checking every 3s."""
+    async def _poll_countdown_then_return(self, adb):
+        """Poll countdown timer; when it disappears, tap return home."""
         from backend.vision.matching import match_template
-        TPL = f"{self._TPL_DIR}/btn_return_home.png"
-        deadline = time.time() + timeout
-        logger.info("Polling return home for %.0fs (check every 3s)...", timeout)
-        while time.time() < deadline:
+        TPL_COUNTDOWN = f"{self._TPL_DIR}/btn_countdown.png"
+        TPL_HOME = f"{self._TPL_DIR}/btn_return_home.png"
+
+        # Phase 1: wait for countdown to disappear (battle in progress)
+        logger.info("Watching countdown timer...")
+        while self._running:
+            await asyncio.sleep(3)
+            screen = await adb.screencap()
+            if screen and not match_template(screen, TPL_COUNTDOWN, threshold=0.7):
+                logger.info("Countdown disappeared — battle over")
+                break
+
+        # Phase 2: poll for return home button
+        logger.info("Polling for return home button...")
+        for _ in range(20):  # max 60s
+            if not self._running:
+                return
+            await asyncio.sleep(3)
             screen = await adb.screencap()
             if screen:
-                pos = match_template(screen, TPL, threshold=0.7)
+                pos = match_template(screen, TPL_HOME, threshold=0.7)
                 if pos:
                     await human_tap(adb, pos[0], pos[1], sigma=10)
-                    logger.info("Return home found during polling at (%d,%d)", pos[0], pos[1])
+                    logger.info("Return home tapped at (%d,%d)", pos[0], pos[1])
                     return
-            wait = min(3, deadline - time.time())
-            if wait > 0:
-                await asyncio.sleep(wait)
-        logger.info("Polling timeout — deferring to _do_return_home")
+        logger.info("Return home not found")
 
     async def _do_return_home(self, adb):
         from backend.vision.matching import match_template
