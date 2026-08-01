@@ -734,7 +734,7 @@ class SequenceRunner:
         logger.info("Returning home — polling for button...")
 
         TPL = f"{self._TPL_DIR}/btn_return_home.png"
-        MAX_POLLS = 15  # 15 × 5s = 75s max wait
+        MAX_POLLS = 25  # 25 × 3s = 75s max wait
 
         for attempt in range(1, MAX_POLLS + 1):
             screen = await adb.screencap()
@@ -745,9 +745,9 @@ class SequenceRunner:
                     logger.info("Return home button found and tapped at (%d,%d) (attempt %d)",
                                 pos[0], pos[1], attempt)
                     break
-            logger.debug("Return home button not yet visible (attempt %d/%d), waiting 5s...",
+            logger.debug("Return home button not yet visible (attempt %d/%d), waiting 3s...",
                          attempt, MAX_POLLS)
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
         else:
             # Fallback: calibrated ROI or center-bottom
             logger.warning("Return home button not found after %ds, using fallback", MAX_POLLS * 5)
