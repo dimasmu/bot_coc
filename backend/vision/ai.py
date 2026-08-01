@@ -67,26 +67,28 @@ RULES:
 - resource: "gold", "elixir", or "dark_elixir" """
 
 
-BASE_PROMPT = """You are a Clash of Clans bot assistant. Analyze this screenshot (1280x720).
-A building was selected from the builder menu. The menu is now closed.
+BASE_PROMPT = """You are a Clash of Clans bot assistant. Analyze this screenshot (1280x300).
+This is the TOP portion of the screen showing a building info panel.
+The building was just selected — the upgrade panel is visible.
 
-At the TOP of the screen there is a building INFO PANEL showing the building name and an "Upgrade" button.
-This button may look like a hammer icon, a cogwheel/gear, or a green bar with cost text.
-It is usually in the upper-right area of the info panel.
+Find the "Upgrade" button. It may appear as:
+- A hammer icon with cost text and a resource icon
+- A cogwheel/gear icon
+- A green "Upgrade" bar/button
 
-Find the EXACT pixel coordinates of this UPGRADE BUTTON.
+The button is typically on the RIGHT side of the info bar.
 
 Return ONLY valid JSON:
 {
   "buildings": [
-    {"name": "UpgradeButton", "x": 750, "y": 180, "cost": 0, "resource": "gold"}
+    {"name": "UpgradeButton", "x": 750, "y": 150, "cost": 0, "resource": "gold"}
   ]
 }
 
 RULES:
-- x,y must be integers in range 0-1279 and 0-749
-- The upgrade button is inside the building info panel at the TOP of the screen
-- point to the EXACT center of the clickable upgrade button"""
+- x in range 0-1279, y in range 0-299
+- point to the EXACT center of the clickable upgrade button
+- Only return the FIRST upgrade button found"""
 
 
 def _parse_response(raw_text: str) -> list[dict] | None:

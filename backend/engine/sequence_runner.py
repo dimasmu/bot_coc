@@ -605,20 +605,31 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(0.5, 1.0)
 
-        # Phase 2: Find upgrade button on base (template match + fallback)
+        # Phase 2: AI find upgrade button in building info panel (top area)
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        from backend.vision.matching import match_template
-        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.4)
-        if hammer_pos:
-            logger.info("Hammer found at (%d,%d)", hammer_pos[0], hammer_pos[1])
-            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+        # Crop to top 300px (building info panel area)
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(screen))
+        crop = img.crop((0, 0, 1280, 300))
+        buf = io.BytesIO()
+        crop.save(buf, format="PNG")
+        screen_cropped = buf.getvalue()
+        logger.info("AI-2: scanning info panel (top 300px)...")
+        base_result = client.analyze_screenshot(screen_cropped, prompt_override=BASE_PROMPT)
+
+        if base_result:
+            btn = base_result[0]
+            # Coords from crop are already relative to (0,0) since we cropped at (0,0)
+            logger.info("Upgrade button at (%d,%d)", btn["x"], btn["y"])
+            await human_tap(adb, btn["x"], btn["y"], sigma=3)
         else:
-            # Fallback: tap info panel area (top-right, where upgrade button usually is)
-            logger.info("Hammer not found, using fallback (750, 150)")
-            await human_tap(adb, 750, 150, sigma=10)
+            logger.warning("No upgrade button found in info panel")
+            self._upgrade_target = None
+            return
         await human_delay(1.0, 2.0)
 
         # Phase 3: Confirm
