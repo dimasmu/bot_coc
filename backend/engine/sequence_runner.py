@@ -561,11 +561,31 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.5, 2.5)
 
-        # Step 2: AI analyze builder menu screenshot
+        # Step 2: AI analyze builder menu screenshot (crop to builder_menu_list ROI)
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
+        # Crop to builder_menu_list region for focused AI analysis
+        list_offset_x, list_offset_y = 0, 0
+        with get_session() as session:
+            list_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu_list").first()
+        if list_roi:
+            import io
+            from PIL import Image
+            img = Image.open(io.BytesIO(screen))
+            list_offset_x, list_offset_y = list_roi.x_pos, list_roi.y_pos
+            cropped = img.crop((
+                list_roi.x_pos, list_roi.y_pos,
+                list_roi.x_pos + list_roi.width,
+                list_roi.y_pos + list_roi.height,
+            ))
+            buf = io.BytesIO()
+            cropped.save(buf, format="PNG")
+            screen = buf.getvalue()
+            logger.info("Cropped to builder_menu_list (%dx%d at %d,%d)",
+                         list_roi.width, list_roi.height,
+                         list_roi.x_pos, list_roi.y_pos)
         client = self._get_ai_client()
         if not client.available:
             logger.warning("AI unavailable")
@@ -573,6 +593,11 @@ class SequenceRunner:
             self._upgrade_target = None
             return
         ai_buildings = client.analyze_screenshot(screen)
+        # Offset AI coordinates back to full-screen
+        if ai_buildings and list_offset_x:
+            for b in ai_buildings:
+                b["x"] += list_offset_x
+                b["y"] += list_offset_y
 
         if not ai_buildings:
             logger.info("No upgradable buildings found")
