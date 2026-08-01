@@ -586,6 +586,7 @@ class SequenceRunner:
 
         screen = await adb.screencap()
         if not screen:
+            self._upgrade_target = None
             return
         confirm_pos = None
         for tpl_path in self._TPL_CONFIRM:
@@ -608,10 +609,9 @@ class SequenceRunner:
     async def _do_upgrade_execute_template(self, adb):
         """Fallback: execute upgrade using template matching (original logic)."""
         from backend.db.database import get_session
-        from backend.db.models import UpgradeQueue, RoiTemplate
+        from backend.db.models import RoiTemplate
         from backend.vision.ocr import read_number
         from backend.vision.matching import match_template
-        from datetime import datetime
 
         if not getattr(self, "_upgrade_target", None):
             logger.info("No upgrade target — skipping")
