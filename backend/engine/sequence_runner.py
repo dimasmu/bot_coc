@@ -391,7 +391,7 @@ class SequenceRunner:
             logger.info("No cards deployed — returning home")
 
     async def _do_upgrade_check(self, adb):
-        """Check builder menu via AI for cheapest upgradable building."""
+        """Check builder menu via AI for cheapest upgradable building. Closes menu after."""
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate
 
@@ -420,6 +420,7 @@ class SequenceRunner:
 
         screen2 = await adb.screencap()
         if not screen2:
+            await human_tap(adb, menu_cx, menu_cy, sigma=3)
             return
 
         client = self._get_ai_client()
@@ -430,10 +431,12 @@ class SequenceRunner:
             return
 
         ai_buildings = client.analyze_screenshot(screen2)
+        # Close menu
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(0.3, 0.8)
+
         if not ai_buildings:
             logger.info("No upgradable buildings found")
-            await human_tap(adb, menu_cx, menu_cy, sigma=3)
-            await human_delay(0.3, 0.8)
             return
 
         building = ai_buildings[0]
@@ -445,19 +448,11 @@ class SequenceRunner:
             logger.info("Cannot afford %s (need %d %s, have %d)",
                          building["name"], building["cost"],
                          building["resource"], res_val)
-            await human_tap(adb, menu_cx, menu_cy, sigma=3)
-            await human_delay(0.3, 0.8)
             return
 
-        # Tap the building's Upgrade button in the builder menu
-        logger.info("Tapping upgrade button at (%d,%d)", building["x"], building["y"])
-        await human_tap(adb, building["x"], building["y"], sigma=3)
-        await human_delay(1.5, 2.5)
-
-        # Keep builder menu open — execute will close it to reveal hammer
         self._upgrade_target = building
-        logger.info("Ready to upgrade: %s (coords: %d,%d)",
-                     building["name"], building["x"], building["y"])
+        logger.info("Ready to upgrade: %s (cost=%d %s)",
+                     building["name"], building["cost"], building["resource"])
 
     # Template paths for upgrade flow
     _TPL_DIR = "storage/templates"
@@ -590,7 +585,7 @@ class SequenceRunner:
         logger.debug("Debug screenshot saved: %s", filepath)
 
     async def _do_upgrade_execute(self, adb):
-        """Execute upgrade: close builder menu, find hammer, tap confirm."""
+        """Execute upgrade using template matching (proven flow)."""
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate
         from backend.vision.matching import match_template
@@ -604,7 +599,7 @@ class SequenceRunner:
         logger.info("Upgrading: %s (cost=%d %s)",
                      building["name"], building["cost"], building["resource"])
 
-        # Step 1: Close builder menu (open from upgrade_check)
+        # Step 1: Open builder menu
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
         if not menu_roi:
@@ -613,22 +608,43 @@ class SequenceRunner:
         menu_cx = menu_roi.x_pos + menu_roi.width // 2
         menu_cy = menu_roi.y_pos + menu_roi.height // 2
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
-        await human_delay(1.0, 2.0)
+        await human_delay(1.5, 2.5)
 
-        # Step 2: Find hammer button on base screen
+        # Step 2: Find "Suggested Upgrades" label, tap 60px below to hit first item
+        screen = await adb.screencap()
+        if not screen:
+            self._upgrade_target = None
+            return
+        sug_pos = match_template(screen, self._TPL_SUGGESTION, threshold=0.7)
+        if sug_pos:
+            await human_tap(adb, sug_pos[0], sug_pos[1] + 60, sigma=5)
+            logger.info("Tapped suggested upgrade at (%d,%d)", sug_pos[0], sug_pos[1] + 60)
+            await human_delay(0.8, 1.5)
+        else:
+            logger.warning("Suggested Upgrades label not found")
+            await human_tap(adb, menu_cx, menu_cy, sigma=3)
+            self._upgrade_target = None
+            return
+
+        # Step 3: Close menu to reveal hammer
+        await human_tap(adb, menu_cx, menu_cy, sigma=3)
+        await human_delay(1.0, 1.5)
+
+        # Step 4: Find and tap hammer
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
         hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.7)
-        if not hammer_pos:
+        if hammer_pos:
+            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+            await human_delay(1.0, 2.0)
+        else:
             logger.warning("Hammer button not found")
             self._upgrade_target = None
             return
-        await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
-        await human_delay(1.0, 2.0)
 
-        # Step 3: Tap confirm button via calibrated ROI
+        # Step 5: Tap confirm button
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
