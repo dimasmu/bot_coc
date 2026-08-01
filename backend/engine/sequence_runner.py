@@ -631,17 +631,24 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.0, 1.5)
 
-        # Step 4: Find and tap hammer
+        # Step 4: AI detect upgrade button on base screen (hammer, cog, gear, etc.)
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.6)
-        if hammer_pos:
-            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+        client = self._get_ai_client()
+        if not client.available:
+            logger.warning("AI unavailable for upgrade button detection")
+            self._upgrade_target = None
+            return
+        ai_buttons = client.analyze_screenshot(screen)
+        if ai_buttons:
+            btn = ai_buttons[0]
+            logger.info("Upgrade button found: %s at (%d,%d)", btn["name"], btn["x"], btn["y"])
+            await human_tap(adb, btn["x"], btn["y"], sigma=3)
             await human_delay(1.0, 2.0)
         else:
-            logger.warning("Hammer button not found")
+            logger.warning("No upgrade button found on base screen")
             self._upgrade_target = None
             return
 
