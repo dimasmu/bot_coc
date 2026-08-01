@@ -539,17 +539,16 @@ class SequenceRunner:
         logger.debug("Debug screenshot saved: %s", filepath)
 
     async def _do_upgrade_execute(self, adb):
-        """Two-AI-call upgrade: menu detection + base button detection."""
+        """Single-AI-call upgrade: find UPGRADE BUTTON in menu, tap, confirm."""
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate
-        from backend.vision.ai import MENU_PROMPT, BASE_PROMPT
+        from backend.vision.ai import MENU_PROMPT
 
         target = getattr(self, "_upgrade_target", None) or {}
         resources = target.get("resources", {"gold": 0, "elixir": 0, "dark_elixir": 0})
 
         self.state = "UPGRADING"
 
-        # === Phase 1: Builder menu ===
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
         if not menu_roi:
@@ -563,7 +562,7 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.5, 2.5)
 
-        # AI call 1: find first suggested upgrade in menu
+        # AI: find upgrade buttons in menu
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
@@ -573,16 +572,15 @@ class SequenceRunner:
             self._upgrade_target = None
             return
         logger.info("AI: scanning builder menu...")
-        menu_result = client.analyze_screenshot(screen, prompt_override=MENU_PROMPT)
+        result = client.analyze_screenshot(screen, prompt_override=MENU_PROMPT)
 
-        if not menu_result:
+        if not result:
             logger.info("No buildings found in menu")
             await human_tap(adb, menu_cx, menu_cy, sigma=3)
             self._upgrade_target = None
             return
 
-        building = menu_result[0]
-        # Check affordability
+        building = result[0]
         r = building.get("resource", "gold")
         if resources.get(r, 0) < building.get("cost", 0):
             logger.info("Cannot afford %s (need %d %s, have %d)",
@@ -591,33 +589,12 @@ class SequenceRunner:
             self._upgrade_target = None
             return
 
-        logger.info("Selected: %s at (%d,%d)", building["name"], building["x"], building["y"])
-        await human_tap(adb, building["x"], building["y"], sigma=5)
-        await human_delay(0.5, 1.0)
-
-        # Close menu
-        await human_tap(adb, menu_cx, menu_cy, sigma=3)
-        await human_delay(0.5, 1.0)
-
-        # === Phase 2: Base screen — find upgrade button ===
-        screen = await adb.screencap()
-        if not screen:
-            self._upgrade_target = None
-            return
-        logger.info("AI: scanning base for upgrade button...")
-        base_result = client.analyze_screenshot(screen, prompt_override=BASE_PROMPT)
-
-        if not base_result:
-            logger.warning("No upgrade button found on base")
-            self._upgrade_target = None
-            return
-
-        btn = base_result[0]
-        logger.info("Upgrade button: at (%d,%d)", btn["x"], btn["y"])
-        await human_tap(adb, btn["x"], btn["y"], sigma=3)
+        # Tap upgrade button directly in menu (opens upgrade panel)
+        logger.info("Tapping upgrade button: %s at (%d,%d)", building["name"], building["x"], building["y"])
+        await human_tap(adb, building["x"], building["y"], sigma=3)
         await human_delay(1.0, 2.0)
 
-        # === Phase 3: Confirm ===
+        # Tap confirm button via ROI
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
