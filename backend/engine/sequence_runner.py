@@ -601,9 +601,10 @@ class SequenceRunner:
             tap_x, tap_y = bld["x"], bld["y"]
             logger.info("OCR not found, using AI coords (%d,%d)", tap_x, tap_y)
         await human_tap(adb, tap_x, tap_y, sigma=5)
-        await human_delay(0.5, 1.0)
+        await human_delay(1.0, 1.5)
+        logger.info("Closing builder menu...")
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
-        await human_delay(0.5, 1.0)
+        await human_delay(1.0, 1.5)
 
         # Phase 2: Template match hammer button on base
         screen = await adb.screencap()
