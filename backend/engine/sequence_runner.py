@@ -606,21 +606,30 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.0, 1.5)
 
-        # Phase 2: Template match hammer button on base
+        # Phase 2: AI + template fallback for upgrade button
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
         from backend.vision.matching import match_template
-        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.4)
+
+        # Try template first (fast), then AI (reliable but slow)
+        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.35)
         if hammer_pos:
-            logger.info("Hammer found at (%d,%d)", hammer_pos[0], hammer_pos[1])
+            logger.info("Hammer (template) at (%d,%d)", hammer_pos[0], hammer_pos[1])
             await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
-            await human_delay(1.0, 2.0)
         else:
-            logger.warning("Hammer not found — cannot upgrade")
-            self._upgrade_target = None
-            return
+            logger.info("Template not found, trying AI...")
+            base_result = client.analyze_screenshot(screen, prompt_override=BASE_PROMPT)
+            if base_result:
+                btn = base_result[0]
+                logger.info("AI upgrade button at (%d,%d)", btn["x"], btn["y"])
+                await human_tap(adb, btn["x"], btn["y"], sigma=5)
+            else:
+                logger.warning("No upgrade button found")
+                self._upgrade_target = None
+                return
+        await human_delay(1.0, 2.0)
 
         # Phase 3: Template match confirm button
         screen = await adb.screencap()

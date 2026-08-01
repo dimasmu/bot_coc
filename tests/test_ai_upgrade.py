@@ -42,7 +42,7 @@ class TestParseResponse:
         result = _parse_response(text)
         assert result == []
 
-    def test_out_of_bounds_coords_filtered(self):
+    def test_out_of_bounds_coords_capped(self):
         text = json.dumps({
             "buildings": [
                 {"name": "Valid", "x": 500, "y": 300, "cost": 0},
@@ -52,8 +52,11 @@ class TestParseResponse:
             ]
         })
         result = _parse_response(text)
-        assert len(result) == 1
+        assert len(result) == 4  # all capped, not filtered
         assert result[0]["name"] == "Valid"
+        assert result[1]["x"] == 1279  # capped
+        assert result[2]["y"] == 719   # capped
+        assert result[3]["x"] == 0      # capped
 
     def test_markdown_wrapped_json(self):
         text = '```json\n{"buildings": [{"name": "Wall", "x": 100, "y": 100, "cost": 50000, "resource": "gold"}]}\n```'

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
 MODEL = "qwen3.7-flash"
 SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 750  # allow slight overflow past 720 for bottom-edge UI elements
+SCREEN_HEIGHT = 800  # generous bound, AI coords get capped to actual screen
 VALID_RESOURCES = {"gold", "elixir", "dark_elixir"}
 MAX_BUILDINGS = 5
 
@@ -130,9 +130,11 @@ def _parse_response(raw_text: str) -> list[dict] | None:
         if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
             continue
         x, y = int(x), int(y)
-        if not (0 <= x < SCREEN_WIDTH and 0 <= y < SCREEN_HEIGHT):
-            logger.warning("Building '%s' coords out of bounds: (%d, %d)", name, x, y)
-            continue
+        if x < 0 or x >= SCREEN_WIDTH or y < 0 or y >= SCREEN_HEIGHT:
+            # Cap to screen bounds instead of skipping
+            x = max(0, min(x, SCREEN_WIDTH - 1))
+            y = max(0, min(y, min(SCREEN_HEIGHT - 1, 719)))  # actual screen is 720
+            logger.warning("Building '%s' coords capped: (%d, %d)", name, x, y)
 
         cost = b.get("cost", 0)
         if isinstance(cost, (int, float)) and not isinstance(cost, bool):
