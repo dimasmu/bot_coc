@@ -2,7 +2,7 @@
 
 import json
 import pytest
-from backend.vision.ai import _parse_response, _build_prompt
+from backend.vision.ai import DashScopeClient, _parse_response, _build_prompt
 
 
 class TestParseResponse:
@@ -96,6 +96,17 @@ class TestParseResponse:
         result = _parse_response(text)
         assert result[0]["resource"] == "gold"
 
+    def test_negative_cost_filtered(self):
+        text = json.dumps({
+            "buildings": [
+                {"name": "BadCost", "x": 500, "y": 300, "cost": -100},
+                {"name": "Good", "x": 400, "y": 200, "cost": 5000},
+            ]
+        })
+        result = _parse_response(text)
+        assert len(result) == 1
+        assert result[0]["name"] == "Good"
+
     def test_capped_at_five(self):
         buildings = [{"name": f"B{i}", "x": 100, "y": 100 + i * 30, "cost": 0} for i in range(10)]
         text = json.dumps({"buildings": buildings})
@@ -113,3 +124,17 @@ class TestBuildPrompt:
         assert "JSON" in prompt
         assert "0-1279" in prompt
         assert "0-719" in prompt
+
+
+class TestDashScopeClient:
+    def test_client_available_with_key(self):
+        client = DashScopeClient("sk-test")
+        assert client.available is True
+
+    def test_client_not_available_without_key(self):
+        client = DashScopeClient()
+        assert client.available is False
+
+    def test_client_not_available_with_none(self):
+        client = DashScopeClient(None)
+        assert client.available is False

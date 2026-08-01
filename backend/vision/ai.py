@@ -1,5 +1,6 @@
 """DashScope AI vision client for analyzing Clash of Clans screenshots."""
 
+import base64
 import json
 import logging
 import re
@@ -87,13 +88,17 @@ def _parse_response(raw_text: str) -> list[dict] | None:
             continue
 
         cost = b.get("cost", 0)
-        if isinstance(cost, (int, float)):
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
             cost = int(cost)
+            if cost < 0:
+                logger.warning("Building '%s' has negative cost %d, skipping", name, cost)
+                continue
         else:
             cost = 0
 
         resource = b.get("resource", "")
         if resource not in VALID_RESOURCES:
+            logger.warning("Unknown resource '%s', defaulting to 'gold'", resource)
             resource = "gold"
 
         valid.append({
@@ -116,6 +121,11 @@ class DashScopeClient:
     def __init__(self, api_key: str | None = None):
         self._api_key = api_key
         self._prompt = _build_prompt()
+        try:
+            import dashscope
+            dashscope.base_http_api_url = BASE_URL
+        except ImportError:
+            pass
 
     @property
     def available(self) -> bool:
@@ -140,9 +150,6 @@ class DashScopeClient:
             logger.error("dashscope package not installed")
             return None
 
-        dashscope.base_http_api_url = BASE_URL
-
-        import base64
         image_b64 = base64.b64encode(png_bytes).decode("ascii")
 
         messages = [{
