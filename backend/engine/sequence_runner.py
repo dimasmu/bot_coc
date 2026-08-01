@@ -361,8 +361,7 @@ class SequenceRunner:
 
         remaining = max(0, (end_time or (time.time() + duration)) - time.time() - 5)
         if remaining > 0:
-            logger.info("Waiting for battle (%.0fs, return home in ~8s)...", remaining)
-            await asyncio.sleep(remaining)
+            await self._poll_return_home(adb, remaining)
 
     async def _do_upgrade_check(self, adb):
         """Check upgrade queue for affordable upgrades with available builders."""
@@ -705,6 +704,25 @@ class SequenceRunner:
                      item.name, item.target_level, detected_cost or 0)
         self._upgrade_item = None
         await human_delay(1.0, 2.0)
+
+    async def _poll_return_home(self, adb, timeout: float):
+        """Poll for return home button during battle wait, checking every 3s."""
+        from backend.vision.matching import match_template
+        TPL = f"{self._TPL_DIR}/btn_return_home.png"
+        deadline = time.time() + timeout
+        logger.info("Polling return home for %.0fs (check every 3s)...", timeout)
+        while time.time() < deadline:
+            screen = await adb.screencap()
+            if screen:
+                pos = match_template(screen, TPL, threshold=0.7)
+                if pos:
+                    await human_tap(adb, pos[0], pos[1], sigma=10)
+                    logger.info("Return home found during polling at (%d,%d)", pos[0], pos[1])
+                    return
+            wait = min(3, deadline - time.time())
+            if wait > 0:
+                await asyncio.sleep(wait)
+        logger.info("Polling timeout — deferring to _do_return_home")
 
     async def _do_return_home(self, adb):
         from backend.vision.matching import match_template
