@@ -482,6 +482,33 @@ class SequenceRunner:
                                     de_roi.width, de_roi.height, roi_name=de_roi.roi_name)
         return {"gold": gold or 0, "elixir": elixir or 0, "dark_elixir": de or 0}
 
+    def _read_resource_safe(self, screen, roi, label: str) -> int:
+        """Read a resource number with sanity check against OCR misreads.
+
+        If OCR returns > 200M (impossible for gold/elixir), likely read
+        part of the icon as a digit. Re-read with 20px left offset.
+        Caps at 200M to prevent downstream issues.
+        """
+        from backend.vision.ocr import read_number
+        MAX_RESOURCE = 200_000_000
+
+        if not roi:
+            return 0
+
+        val = read_number(screen, roi.x_pos, roi.y_pos, roi.width, roi.height,
+                          roi_name=roi.roi_name) or 0
+
+        if val > MAX_RESOURCE:
+            logger.warning("%s OCR misread: %d (icon noise?), retrying with offset", label, val)
+            val = read_number(screen, roi.x_pos + 20, roi.y_pos,
+                              max(1, roi.width - 20), roi.height,
+                              roi_name=roi.roi_name) or 0
+            if val > MAX_RESOURCE:
+                logger.error("%s still > %d after retry: %d", label, MAX_RESOURCE, val)
+                val = 0
+
+        return val
+
     async def read_current_resources(self):
         """Take a screenshot and OCR own-base resources into instance variables.
 
@@ -505,10 +532,10 @@ class SequenceRunner:
             de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
             gems_roi = session.query(RoiTemplate).filter_by(roi_name="own_gems_number").first()
 
-        self.current_gold = (gold_roi and read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
-            gold_roi.width, gold_roi.height, roi_name=gold_roi.roi_name)) or 0
-        self.current_elixir = (elixir_roi and read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
-            elixir_roi.width, elixir_roi.height, roi_name=elixir_roi.roi_name)) or 0
+        self.current_gold = self._read_resource_safe(
+            screen, gold_roi, "gold")
+        self.current_elixir = self._read_resource_safe(
+            screen, elixir_roi, "elixir")
 
         # Dark elixir only exists at TH >= 7. When absent, gems occupies that position.
         de_tpl = f"{self._TPL_DIR}/icon_dark_elixir.png"
