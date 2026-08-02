@@ -35,6 +35,7 @@ document.addEventListener("alpine:init", () => {
     currentElixir: 0,
     currentDarkElixir: 0,
     currentGems: 0,
+    loopMode: "",
     wsBotStatus: null,
     activeSequenceId: null,
 
@@ -194,6 +195,7 @@ document.addEventListener("alpine:init", () => {
         this.currentElixir = data.current_elixir ?? 0;
         this.currentDarkElixir = data.current_dark_elixir ?? 0;
         this.currentGems = data.current_gems ?? 0;
+        this.loopMode = data.loop_mode ?? "";
       };
       ws.onclose = () => { this.wsBotStatus = null; };
       this.wsBotStatus = ws;
