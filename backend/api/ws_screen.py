@@ -67,7 +67,7 @@ async def screen_stream(websocket: WebSocket):
                 if frame is not None:
                     # Resize for faster streaming (1280x720 → 640x360)
                     img = Image.open(io.BytesIO(frame))
-                    img = img.resize(
+                    img = img.convert("RGB").resize(
                         (img.width // SCALE, img.height // SCALE),
                         Image.LANCZOS)
                     buf = io.BytesIO()
