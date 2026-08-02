@@ -107,13 +107,18 @@
                 Stop Bot
               </button>
             </div>
-          </div>
-          <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+            <hr class="border-slate-700 my-3">
             <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Resources</h3>
             <div class="text-sm space-y-1">
-              <div class="flex justify-between"><span>Gold</span><span class="text-yellow-400" x-text="currentGold.toLocaleString('de-DE')"></span></div>
-              <div class="flex justify-between"><span>Elixir</span><span class="text-pink-400" x-text="currentElixir.toLocaleString('de-DE')"></span></div>
-              <div class="flex justify-between"><span>Dark E.</span><span class="text-purple-400" x-text="currentDarkElixir.toLocaleString('de-DE')"></span></div>
+              <div class="flex justify-between"><span>Gold</span>
+                <span><span class="text-yellow-400" x-text="currentGold.toLocaleString('de-DE')"></span>
+                <span x-show="goldMax" class="ml-1 px-1 py-0.5 rounded text-[10px] font-bold bg-yellow-900 text-yellow-300">MAX</span></span></div>
+              <div class="flex justify-between"><span>Elixir</span>
+                <span><span class="text-pink-400" x-text="currentElixir.toLocaleString('de-DE')"></span>
+                <span x-show="elixirMax" class="ml-1 px-1 py-0.5 rounded text-[10px] font-bold bg-pink-900 text-pink-300">MAX</span></span></div>
+              <div class="flex justify-between"><span>Dark E.</span>
+                <span><span class="text-purple-400" x-text="currentDarkElixir.toLocaleString('de-DE')"></span>
+                <span x-show="darkElixirMax" class="ml-1 px-1 py-0.5 rounded text-[10px] font-bold bg-purple-900 text-purple-300">MAX</span></span></div>
               <div class="flex justify-between"><span>Gems</span><span class="text-green-400" x-text="currentGems.toLocaleString('de-DE')"></span></div>
             </div>
           </div>
