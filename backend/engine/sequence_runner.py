@@ -120,7 +120,8 @@ class SequenceRunner:
                     await asyncio.sleep(2)
 
             if self._running:
-                current_mode = await self._evaluate_mode(adb)
+                if current_mode != "farming":
+                    current_mode = await self._evaluate_mode(adb)
                 self._loop_mode = current_mode
                 await self.read_current_resources()
 
