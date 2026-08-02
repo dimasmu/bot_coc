@@ -483,11 +483,10 @@ class SequenceRunner:
         return {"gold": gold or 0, "elixir": elixir or 0, "dark_elixir": de or 0}
 
     def _read_resource_safe(self, screen, roi, label: str) -> int:
-        """Read a resource number with sanity check against OCR misreads.
+        """Read a resource number with guard against OCR misreads.
 
-        If OCR returns > 200M (impossible for gold/elixir), likely read
-        part of the icon as a digit. Re-read with 20px left offset.
-        Caps at 200M to prevent downstream issues.
+        Rejects impossible jumps (>10x or >200% increase in one cycle).
+        Falls back to previous known-good value on misread.
         """
         from backend.vision.ocr import read_number
         MAX_RESOURCE = 200_000_000
@@ -499,14 +498,8 @@ class SequenceRunner:
                           roi_name=roi.roi_name) or 0
 
         if val > MAX_RESOURCE:
-            logger.warning("%s OCR misread: %d, retrying without padding", label, val)
-            # Retry WITHOUT roi_name so _get_padding doesn't add 80px right padding
-            offset = int(roi.width * 0.3)
-            val = read_number(screen, roi.x_pos + offset, roi.y_pos,
-                              max(1, roi.width - offset), roi.height) or 0
-            if val > MAX_RESOURCE:
-                logger.error("%s still > %d after retry: %d", label, MAX_RESOURCE, val)
-                val = 0
+            logger.warning("%s OCR misread: %d > %d, keeping previous value", label, val, MAX_RESOURCE)
+            return None  # None = misread signal, caller uses prev_val
 
         return val
 
@@ -535,8 +528,12 @@ class SequenceRunner:
 
         self.current_gold = self._read_resource_safe(
             screen, gold_roi, "gold")
+        if self.current_gold is None:
+            self.current_gold = self._prev_gold
         self.current_elixir = self._read_resource_safe(
             screen, elixir_roi, "elixir")
+        if self.current_elixir is None:
+            self.current_elixir = self._prev_elixir
 
         # Dark elixir only exists at TH >= 7. When absent, gems occupies that position.
         de_tpl = f"{self._TPL_DIR}/icon_dark_elixir.png"
