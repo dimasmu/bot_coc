@@ -804,6 +804,19 @@ class SequenceRunner:
         logger.info("Upgrade started: %s (cost=%d %s)",
                      bld["name"], bld["cost"], bld["resource"])
         self._upgrade_target = None
+
+        # Reset maxed flag for the resource just spent
+        res = bld.get("resource", "gold")
+        if res == "gold":
+            self._gold_stable = 0
+            self._gold_max = False
+        elif res == "elixir":
+            self._elixir_stable = 0
+            self._elixir_max = False
+        elif res == "dark_elixir":
+            self._de_stable = 0
+            self._dark_elixir_max = False
+
         await human_delay(1.0, 2.0)
 
     async def _do_upgrade_execute_template(self, adb):
