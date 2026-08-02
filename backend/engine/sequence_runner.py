@@ -499,9 +499,11 @@ class SequenceRunner:
                           roi_name=roi.roi_name) or 0
 
         if val > MAX_RESOURCE:
-            logger.warning("%s OCR misread: %d (icon noise?), retrying with offset", label, val)
-            val = read_number(screen, roi.x_pos + 20, roi.y_pos,
-                              max(1, roi.width - 20), roi.height,
+            logger.warning("%s OCR misread: %d (label noise?), retrying right-half ROI", label, val)
+            # Read from the right half of the ROI — that's where the number is
+            half_w = roi.width // 2
+            val = read_number(screen, roi.x_pos + half_w, roi.y_pos,
+                              max(1, half_w), roi.height,
                               roi_name=roi.roi_name) or 0
             if val > MAX_RESOURCE:
                 logger.error("%s still > %d after retry: %d", label, MAX_RESOURCE, val)
