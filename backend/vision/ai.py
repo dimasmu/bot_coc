@@ -207,9 +207,10 @@ class DashScopeClient:
         img = Image.open(io.BytesIO(png_bytes))
         logger.info("Screenshot: %dx%d", img.width, img.height)
 
-        # Resize to half resolution to reduce API latency
-        # (1280x720 → 640x360, ~1.3MB → ~100KB)
+        # Resize to half resolution and convert to JPEG to reduce API latency
+        # (1280x720 RGBA → 640x360 JPEG, ~1.3MB → ~100KB)
         img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        img = img.convert("RGB")  # drop alpha channel for JPEG
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=80)
         image_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
