@@ -35,6 +35,15 @@ class SequenceRunner:
         self._upgrade_target = None  # {name, x, y, cost, resource} from AI
         self._loop_mode = ""  # "farming" or "upgrade"
         self._ai_client = None  # lazy-init DashScope client
+        self._gold_max = False
+        self._elixir_max = False
+        self._dark_elixir_max = False
+        self._prev_gold = 0
+        self._prev_elixir = 0
+        self._prev_dark_elixir = 0
+        self._gold_stable = 0
+        self._elixir_stable = 0
+        self._de_stable = 0
 
     @property
     def is_running(self):
@@ -53,6 +62,9 @@ class SequenceRunner:
             "current_dark_elixir": self.current_dark_elixir,
             "current_gems": self.current_gems,
             "loop_mode": self._loop_mode,
+            "gold_max": self._gold_max,
+            "elixir_max": self._elixir_max,
+            "dark_elixir_max": self._dark_elixir_max,
         }
 
     async def start(self, sequence_id: int | None = None):
