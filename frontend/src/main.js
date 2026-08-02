@@ -112,6 +112,21 @@ document.addEventListener("alpine:init", () => {
       this.loadAnalytics();
       this.connectLogs();
 
+      // Dashboard canvas click → tap on emulator
+      document.addEventListener("DOMContentLoaded", () => {
+        const canvas = document.getElementById("screenCanvas");
+        if (!canvas) return;
+        canvas.addEventListener("click", (e) => {
+          if (!this.wsScreen || this.wsScreen.readyState !== WebSocket.OPEN) return;
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const cx = (e.clientX - rect.left) * scaleX;
+          const cy = (e.clientY - rect.top) * scaleY;
+          this.wsScreen.send(`tap ${Math.round(cx)} ${Math.round(cy)}`);
+        });
+      });
+
       // Re-send log filter to server when user changes tab
       this.$watch('logFilter', (filter) => {
         if (this.wsLogs && this.wsLogs.readyState === WebSocket.OPEN) {
