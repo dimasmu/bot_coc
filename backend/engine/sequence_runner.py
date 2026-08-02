@@ -482,19 +482,25 @@ class SequenceRunner:
                                     de_roi.width, de_roi.height, roi_name=de_roi.roi_name)
         return {"gold": gold or 0, "elixir": elixir or 0, "dark_elixir": de or 0}
 
-    def _read_resource_safe(self, screen, roi, label: str) -> int:
+    def _read_resource_safe(self, screen, roi, label: str) -> int | None:
         """Read a resource number with guard against OCR misreads.
 
-        Rejects impossible jumps (>10x or >200% increase in one cycle).
-        Falls back to previous known-good value on misread.
+        Uses capped height (25px) to avoid reading collector/label text
+        that appears above and below the number.
+        Rejects impossible values (>200M).
+        Returns None on misread (caller falls back to previous value).
         """
         from backend.vision.ocr import read_number
         MAX_RESOURCE = 200_000_000
+        MAX_HEIGHT = 25  # number text is ~20px, avoid labels above/below
 
         if not roi:
             return 0
 
-        val = read_number(screen, roi.x_pos, roi.y_pos, roi.width, roi.height,
+        # Read with capped height to skip collector/production labels
+        h = min(roi.height, MAX_HEIGHT)
+        y = roi.y_pos + (roi.height - h) // 2  # center the crop
+        val = read_number(screen, roi.x_pos, y, roi.width, h,
                           roi_name=roi.roi_name) or 0
 
         if val > MAX_RESOURCE:
@@ -537,7 +543,7 @@ class SequenceRunner:
 
         # Dark elixir only exists at TH >= 7. When absent, gems occupies that position.
         de_tpl = f"{self._TPL_DIR}/icon_dark_elixir.png"
-        if match_template(screen, de_tpl, threshold=0.5):
+        if match_template(screen, de_tpl, threshold=0.4):
             self.current_dark_elixir = (de_roi and read_number(screen, de_roi.x_pos, de_roi.y_pos,
                 de_roi.width, de_roi.height, roi_name=de_roi.roi_name)) or 0
             self.current_gems = (gems_roi and read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
