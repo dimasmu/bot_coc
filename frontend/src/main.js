@@ -31,6 +31,10 @@ document.addEventListener("alpine:init", () => {
     // Bot state
     botState: "STOPPED",
     botRunning: false,
+    currentGold: 0,
+    currentElixir: 0,
+    currentDarkElixir: 0,
+    currentGems: 0,
     wsBotStatus: null,
     activeSequenceId: null,
 
@@ -65,6 +69,12 @@ document.addEventListener("alpine:init", () => {
     logLines: [],
     logFilter: "INFO",
     wsLogs: null,
+
+    get filteredLogLines() {
+      const lv = {DEBUG:0, INFO:1, WARNING:2, ERROR:3, CRITICAL:4};
+      const min = lv[this.logFilter] ?? 1;
+      return this.logLines.filter(line => (lv[line.level] ?? 1) >= min);
+    },
 
     // Sequences
     sequences: [],
@@ -177,6 +187,10 @@ document.addEventListener("alpine:init", () => {
         const data = JSON.parse(event.data);
         this.botState = data.state;
         this.botRunning = data.running;
+        this.currentGold = data.current_gold ?? 0;
+        this.currentElixir = data.current_elixir ?? 0;
+        this.currentDarkElixir = data.current_dark_elixir ?? 0;
+        this.currentGems = data.current_gems ?? 0;
       };
       ws.onclose = () => { this.wsBotStatus = null; };
       this.wsBotStatus = ws;
