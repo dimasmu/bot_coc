@@ -616,15 +616,26 @@ class SequenceRunner:
             return
         from backend.vision.matching import match_template
 
+        # Crop to center area (skip top builder icons, bottom UI)
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(screen))
+        crop = img.crop((100, 150, 1180, 600))
+        buf = io.BytesIO()
+        crop.save(buf, format="PNG")
+        screen_crop = buf.getvalue()
+
         btn_pos = None
         for tpl_path in self._TPL_UPGRADE_BTNS:
-            btn_pos = match_template(screen, tpl_path, threshold=0.5)
-            if btn_pos:
+            pos = match_template(screen_crop, tpl_path, threshold=0.5)
+            if pos:
+                # Offset back: crop started at (100, 150)
+                btn_pos = (pos[0] + 100, pos[1] + 150)
                 logger.info("Found upgrade btn via %s at (%d,%d)", tpl_path, btn_pos[0], btn_pos[1])
                 break
 
         if btn_pos:
-            await human_tap(adb, btn_pos[0], btn_pos[1], sigma=3)
+            await human_tap(adb, btn_pos[0], btn_pos[1], sigma=5)
         else:
             logger.warning("No upgrade button found (hammer/cog)")
             self._upgrade_target = None
