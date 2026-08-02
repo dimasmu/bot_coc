@@ -35,6 +35,9 @@ document.addEventListener("alpine:init", () => {
     currentElixir: 0,
     currentDarkElixir: 0,
     currentGems: 0,
+    goldMax: false,
+    elixirMax: false,
+    darkElixirMax: false,
     loopMode: "",
     wsBotStatus: null,
     activeSequenceId: null,
@@ -197,6 +200,9 @@ document.addEventListener("alpine:init", () => {
         this.currentDarkElixir = data.current_dark_elixir ?? 0;
         this.currentGems = data.current_gems ?? 0;
         this.loopMode = data.loop_mode ?? "";
+        this.goldMax = data.gold_max ?? false;
+        this.elixirMax = data.elixir_max ?? false;
+        this.darkElixirMax = data.dark_elixir_max ?? false;
       };
       ws.onclose = () => { this.wsBotStatus = null; };
       this.wsBotStatus = ws;
