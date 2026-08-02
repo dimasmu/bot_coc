@@ -452,14 +452,14 @@ class SequenceRunner:
             de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
             gems_roi = session.query(RoiTemplate).filter_by(roi_name="own_gems_number").first()
 
-        self.current_gold = gold_roi and (read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
-            gold_roi.width, gold_roi.height, roi_name=gold_roi.roi_name) or 0)
-        self.current_elixir = elixir_roi and (read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
-            elixir_roi.width, elixir_roi.height, roi_name=elixir_roi.roi_name) or 0)
-        self.current_dark_elixir = de_roi and (read_number(screen, de_roi.x_pos, de_roi.y_pos,
-            de_roi.width, de_roi.height, roi_name=de_roi.roi_name) or 0)
-        self.current_gems = gems_roi and (read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
-            gems_roi.width, gems_roi.height, roi_name=gems_roi.roi_name) or 0)
+        self.current_gold = (gold_roi and read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
+            gold_roi.width, gold_roi.height, roi_name=gold_roi.roi_name)) or 0
+        self.current_elixir = (elixir_roi and read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
+            elixir_roi.width, elixir_roi.height, roi_name=elixir_roi.roi_name)) or 0
+        self.current_dark_elixir = (de_roi and read_number(screen, de_roi.x_pos, de_roi.y_pos,
+            de_roi.width, de_roi.height, roi_name=de_roi.roi_name)) or 0
+        self.current_gems = (gems_roi and read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
+            gems_roi.width, gems_roi.height, roi_name=gems_roi.roi_name)) or 0
 
         logger.info("Resources read: G=%d E=%d DE=%d Gems=%d",
             self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
