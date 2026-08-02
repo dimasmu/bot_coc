@@ -492,15 +492,11 @@ class SequenceRunner:
         """
         from backend.vision.ocr import read_number
         MAX_RESOURCE = 200_000_000
-        MAX_HEIGHT = 30  # number text is ~25px, avoid labels above/below
 
         if not roi:
             return 0
 
-        # Read with capped height to skip collector/production labels
-        h = min(roi.height, MAX_HEIGHT)
-        y = roi.y_pos + (roi.height - h) // 2  # center the crop
-        val = read_number(screen, roi.x_pos, y, roi.width, h,
+        val = read_number(screen, roi.x_pos, roi.y_pos, roi.width, roi.height,
                           roi_name=roi.roi_name) or 0
 
         if val > MAX_RESOURCE:
