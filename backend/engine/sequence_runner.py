@@ -407,6 +407,9 @@ class SequenceRunner:
     _TPL_DIR = "storage/templates"
     _TPL_SUGGESTION = f"{_TPL_DIR}/btn_upgrade_suggestion.png"
     _TPL_HAMMER = f"{_TPL_DIR}/btn_upgrade_hammer.png"
+    _TPL_COG = f"{_TPL_DIR}/cog_upgrade.png"
+    _TPL_UPGRADE_BTNS = [f"{_TPL_DIR}/btn_upgrade_hammer.png",
+                         f"{_TPL_DIR}/cog_upgrade.png"]
     _TPL_CONFIRM = [f"{_TPL_DIR}/btn_upgrade_confirm_1.png",
                     f"{_TPL_DIR}/btn_upgrade_confirm_2.png"]
 
@@ -606,29 +609,26 @@ class SequenceRunner:
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.0, 1.5)
 
-        # Phase 2: AI + template fallback for upgrade button
+        # Phase 2: Template match hammer OR cog
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
         from backend.vision.matching import match_template
 
-        # Try template first (fast), then AI (reliable but slow)
-        hammer_pos = match_template(screen, self._TPL_HAMMER, threshold=0.35)
-        if hammer_pos:
-            logger.info("Hammer (template) at (%d,%d)", hammer_pos[0], hammer_pos[1])
-            await human_tap(adb, hammer_pos[0], hammer_pos[1], sigma=3)
+        btn_pos = None
+        for tpl_path in self._TPL_UPGRADE_BTNS:
+            btn_pos = match_template(screen, tpl_path, threshold=0.5)
+            if btn_pos:
+                logger.info("Found upgrade btn via %s at (%d,%d)", tpl_path, btn_pos[0], btn_pos[1])
+                break
+
+        if btn_pos:
+            await human_tap(adb, btn_pos[0], btn_pos[1], sigma=3)
         else:
-            logger.info("Template not found, trying AI...")
-            base_result = client.analyze_screenshot(screen, prompt_override=BASE_PROMPT)
-            if base_result:
-                btn = base_result[0]
-                logger.info("AI upgrade button at (%d,%d)", btn["x"], btn["y"])
-                await human_tap(adb, btn["x"], btn["y"], sigma=5)
-            else:
-                logger.warning("No upgrade button found")
-                self._upgrade_target = None
-                return
+            logger.warning("No upgrade button found (hammer/cog)")
+            self._upgrade_target = None
+            return
         await human_delay(1.0, 2.0)
 
         # Phase 3: Template match confirm button
