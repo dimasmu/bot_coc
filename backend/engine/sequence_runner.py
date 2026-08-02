@@ -495,6 +495,7 @@ class SequenceRunner:
 
     def _read_builder_count(self, screen) -> int:
         """OCR free builder count from format 'X/Y' (e.g. '2/5'). Defaults to 1 if misread."""
+        import re
         from backend.vision.ocr import read_raw_text, read_number
 
         with get_session() as session:
