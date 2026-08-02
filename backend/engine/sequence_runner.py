@@ -504,7 +504,16 @@ class SequenceRunner:
                           roi_name=roi.roi_name) or 0
 
         if val > MAX_RESOURCE:
-            logger.warning("%s OCR misread: %d > %d, keeping previous value", label, val, MAX_RESOURCE)
+            # Try to auto-fix: OCR often reads "31" as "317" — try removing
+            # one '7' from the first 3 digit positions
+            s = str(val)
+            for i in range(min(3, len(s))):
+                if s[i] == '7':
+                    fixed = int(s[:i] + s[i+1:])
+                    if fixed <= MAX_RESOURCE:
+                        logger.info("%s OCR auto-fixed: %d → %d", label, val, fixed)
+                        return fixed
+            logger.warning("%s OCR misread: %d, falling back to previous", label, val)
             return None  # None = misread signal, caller uses prev_val
 
         return val
