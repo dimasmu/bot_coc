@@ -400,17 +400,24 @@ class SequenceRunner:
             logger.info("No cards deployed — returning home")
 
     async def _do_upgrade_check(self, adb):
-        """Read resources, store basic target info for _do_upgrade_execute."""
+        """Read builder count and resources, store for _do_upgrade_execute."""
         self.state = "UPGRADE_CHECK"
-        logger.info("Checking resources for upgrade...")
+        logger.info("Checking builders and resources for upgrade...")
         screen = await adb.screencap()
-        if screen:
-            resources = self._read_resources(screen)
-            logger.info("Resources: G=%d E=%d DE=%d",
-                         resources["gold"], resources["elixir"], resources["dark_elixir"])
-            self._upgrade_target = {"resources": resources}
-        else:
+        if not screen:
             self._upgrade_target = None
+            return
+
+        builders = self._read_builder_count(screen)
+        if builders < 1:
+            logger.info("No free builders — skipping upgrade")
+            self._upgrade_target = None
+            return
+
+        resources = self._read_resources(screen)
+        logger.info("Builders=%d Resources: G=%d E=%d DE=%d",
+                     builders, resources["gold"], resources["elixir"], resources["dark_elixir"])
+        self._upgrade_target = {"resources": resources}
 
     # Template paths for upgrade flow
     _TPL_DIR = "storage/templates"
