@@ -12,6 +12,7 @@ BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
 MODEL = "qwen3.7-flash"
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 800  # generous bound, AI coords get capped to actual screen
+AI_RESIZE = 2  # send image at half-resolution, scale coords back by 2x
 VALID_RESOURCES = {"gold", "elixir", "dark_elixir"}
 MAX_BUILDINGS = 5
 
@@ -206,7 +207,12 @@ class DashScopeClient:
         img = Image.open(io.BytesIO(png_bytes))
         logger.info("Screenshot: %dx%d", img.width, img.height)
 
-        image_b64 = base64.b64encode(png_bytes).decode("ascii")
+        # Resize to half resolution to reduce API latency
+        # (1280x720 → 640x360, ~1.3MB → ~100KB)
+        img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        image_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         messages = [{
             "role": "user",
@@ -247,4 +253,10 @@ class DashScopeClient:
             return None
 
         logger.debug("AI raw response: %s", text[:500])
-        return _parse_response(text)
+        result = _parse_response(text)
+        if result is not None:
+            # Scale coordinates from resized image back to 1280x720
+            for b in result:
+                b["x"] *= AI_RESIZE
+                b["y"] *= AI_RESIZE
+        return result
