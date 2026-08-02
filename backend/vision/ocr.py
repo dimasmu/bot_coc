@@ -60,12 +60,14 @@ def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
         roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
 
         reader = _get_reader()
-        results = reader.readtext(roi, detail=0, paragraph=True)
+        results = reader.readtext(roi, detail=0)
+        if results:
+            logger.info("EasyOCR %s raw: %r", roi_name or "generic", results)
         for r in results:
             text = re.sub(r"\D", "", r)
             if text:
                 val = int(text)
-                logger.debug("EasyOCR %s → %d (raw=%r)", roi_name or "generic", val, r)
+                logger.info("EasyOCR %s → %d (raw=%r)", roi_name or "generic", val, r)
                 return val
 
         return None
