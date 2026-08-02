@@ -436,6 +436,34 @@ class SequenceRunner:
                                     de_roi.width, de_roi.height, roi_name=de_roi.roi_name)
         return {"gold": gold or 0, "elixir": elixir or 0, "dark_elixir": de or 0}
 
+    async def read_current_resources(self):
+        """Take a screenshot and OCR own-base resources into instance variables."""
+        adb = adb_manager
+        if not adb.is_connected:
+            return
+        screen = await adb.screencap()
+        if not screen:
+            return
+
+        from backend.vision.ocr import read_number
+        with get_session() as session:
+            gold_roi = session.query(RoiTemplate).filter_by(roi_name="own_gold_number").first()
+            elixir_roi = session.query(RoiTemplate).filter_by(roi_name="own_elixir_number").first()
+            de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
+            gems_roi = session.query(RoiTemplate).filter_by(roi_name="own_gems_number").first()
+
+        self.current_gold = gold_roi and (read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
+            gold_roi.width, gold_roi.height, roi_name=gold_roi.roi_name) or 0)
+        self.current_elixir = elixir_roi and (read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
+            elixir_roi.width, elixir_roi.height, roi_name=elixir_roi.roi_name) or 0)
+        self.current_dark_elixir = de_roi and (read_number(screen, de_roi.x_pos, de_roi.y_pos,
+            de_roi.width, de_roi.height, roi_name=de_roi.roi_name) or 0)
+        self.current_gems = gems_roi and (read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
+            gems_roi.width, gems_roi.height, roi_name=gems_roi.roi_name) or 0)
+
+        logger.info("Resources read: G=%d E=%d DE=%d Gems=%d",
+            self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
+
     def _read_builder_count(self, screen) -> int:
         """OCR free builder count from a screenshot. Defaults to 1 if misread."""
         from backend.vision.ocr import read_number
