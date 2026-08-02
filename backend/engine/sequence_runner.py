@@ -494,24 +494,36 @@ class SequenceRunner:
         pos = match_template(screen, tpl_path, threshold=0.7)
         if pos:
             x = pos[0] + offset_x
-            y = pos[1] - 15
-            val = read_number(screen, x, y, width, 30)
+            y = pos[1] - 20
+            val = read_number(screen, x, y, width, 40)
             if val is not None:
-                logger.debug("Resource %s via template: %d", tpl_name, val)
+                logger.info("Resource %s via template at (%d,%d): %d",
+                            tpl_name, pos[0], pos[1], val)
                 return val
+            logger.info("Template %s matched at (%d,%d) but OCR failed (%d,%d %dx40)",
+                        tpl_name, pos[0], pos[1], x, y, width)
+            # OCR failed on template area — fall through to ROI
+
+        else:
+            logger.debug("Template %s not matched", tpl_name)
 
         if not required:
-            logger.debug("Resource %s not found (optional), returning 0", tpl_name)
+            logger.info("Resource %s not found (optional), returning 0", tpl_name)
             return 0
 
         # Fallback: use calibrated DB ROI
-        logger.debug("Template %s not matched, using ROI fallback %s", tpl_name, roi_name)
+        logger.info("Using ROI fallback %s for %s", roi_name, tpl_name)
         with get_session() as session:
             roi = session.query(RoiTemplate).filter_by(roi_name=roi_name).first()
         if roi:
             val = read_number(screen, roi.x_pos, roi.y_pos, roi.width, roi.height,
                               roi_name=roi.roi_name)
+            if val is not None:
+                logger.info("Resource %s via ROI fallback: %d", roi_name, val)
+            else:
+                logger.warning("Resource %s via ROI fallback: OCR returned None", roi_name)
             return val or 0
+        logger.warning("ROI %s not found in DB", roi_name)
         return 0
 
     def _read_resources(self, screen) -> dict:
@@ -544,13 +556,13 @@ class SequenceRunner:
             return
 
         self.current_gold = self._read_resource(screen, "icon_gold.png",
-            roi_name="own_gold_number", offset_x=35, width=200) or 0
+            roi_name="own_gold_number", offset_x=35, width=250) or 0
         self.current_elixir = self._read_resource(screen, "icon_elixir.png",
-            roi_name="own_elixir_number", offset_x=35, width=200) or 0
+            roi_name="own_elixir_number", offset_x=35, width=250) or 0
         self.current_dark_elixir = self._read_resource(screen, "icon_dark_elixir.png",
-            roi_name="own_dark_elixir_number", offset_x=35, width=200, required=False) or 0
+            roi_name="own_dark_elixir_number", offset_x=35, width=250, required=False) or 0
         self.current_gems = self._read_resource(screen, "icon_gems.png",
-            roi_name="own_gems_number", offset_x=35, width=200) or 0
+            roi_name="own_gems_number", offset_x=35, width=250) or 0
 
         logger.info("Resources read: G=%d E=%d DE=%d Gems=%d",
             self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
