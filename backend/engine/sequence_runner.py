@@ -492,7 +492,7 @@ class SequenceRunner:
         """
         from backend.vision.ocr import read_number
         MAX_RESOURCE = 200_000_000
-        MAX_HEIGHT = 25  # number text is ~20px, avoid labels above/below
+        MAX_HEIGHT = 30  # number text is ~25px, avoid labels above/below
 
         if not roi:
             return 0
