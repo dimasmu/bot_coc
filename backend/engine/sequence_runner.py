@@ -118,6 +118,7 @@ class SequenceRunner:
 
             if self._running:
                 current_mode = await self._evaluate_mode(adb)
+                await self.read_current_resources()
 
     async def _execute_step(self, step, adb):
         stype = step.step_type
