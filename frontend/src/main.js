@@ -145,6 +145,9 @@ document.addEventListener("alpine:init", () => {
         });
         const data = await res.json();
         this.adbStatus = data.status;
+        if (this.adbStatus.connected && this.wsBotStatus && this.wsBotStatus.readyState === WebSocket.OPEN) {
+          this.wsBotStatus.send(JSON.stringify({ command: "read_resources" }));
+        }
         if (this.adbStatus.connected && this.activeTab === 'calibrator') {
           this.captureScreenshot();
         }
