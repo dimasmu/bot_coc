@@ -552,7 +552,7 @@ class SequenceRunner:
 
         # Dark elixir only exists at TH >= 7. When absent, gems occupies that position.
         de_tpl = f"{self._TPL_DIR}/icon_dark_elixir.png"
-        if match_template(screen, de_tpl, threshold=0.4):
+        if match_template(screen, de_tpl, threshold=0.5):
             self.current_dark_elixir = (de_roi and read_number(screen, de_roi.x_pos, de_roi.y_pos,
                 de_roi.width, de_roi.height, roi_name=de_roi.roi_name)) or 0
             self.current_gems = (gems_roi and read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
