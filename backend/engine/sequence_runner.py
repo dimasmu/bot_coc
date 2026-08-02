@@ -120,17 +120,26 @@ class SequenceRunner:
                     await asyncio.sleep(2)
 
             if self._running:
-                if current_mode != "farming":
-                    current_mode = await self._evaluate_mode(adb)
-                else:
-                    # Lightweight: OCR builder count only, no AI
-                    await human_delay(0.5, 1.0)
-                    screen = await adb.screencap()
-                    if screen and self._read_builder_count(screen) > 0:
-                        current_mode = "upgrade"
-                        logger.info("Builder free — switching to upgrade loop")
-                self._loop_mode = current_mode
-                await self.read_current_resources()
+                try:
+                    if current_mode != "farming":
+                        current_mode = await self._evaluate_mode(adb)
+                    else:
+                        # Lightweight: OCR builder count only, no AI
+                        await human_delay(0.5, 1.0)
+                        screen = await adb.screencap()
+                        if screen:
+                            builders = self._read_builder_count(screen)
+                            logger.info("Builder count: %d", builders)
+                            if builders > 0:
+                                current_mode = "upgrade"
+                                logger.info("Builder free — switching to upgrade loop")
+                        else:
+                            logger.warning("Screencap failed during builder check")
+                    self._loop_mode = current_mode
+                    await self.read_current_resources()
+                except Exception as e:
+                    logger.error("Post-loop evaluate failed: %s", e)
+                    await asyncio.sleep(2)
 
     async def _execute_step(self, step, adb):
         stype = step.step_type
