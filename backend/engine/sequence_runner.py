@@ -206,6 +206,11 @@ class SequenceRunner:
             self.state = f"SEARCHING #{search_count}"
             logger.info("Search #%d: Gold=%s Elixir=%s", search_count, gold_val, elixir_val)
 
+            if gold_val is None and elixir_val is None:
+                logger.info("OCR failed for both — attacking blind")
+                self._last_search_count = search_count
+                return
+
             if gold_val and gold_val >= min_gold and elixir_val and elixir_val >= min_elixir:
                 logger.info("Target found! G=%d E=%d", gold_val, elixir_val)
                 self._last_search_count = search_count
