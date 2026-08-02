@@ -789,32 +789,41 @@ class SequenceRunner:
             return
         await human_delay(1.0, 2.0)
 
-        # Phase 3: Template match confirm button
+        # Phase 3: Find "Confirm" text via OCR (reliable across event skins)
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        confirm_pos = None
-        for tpl_path in self._TPL_CONFIRM:
-            confirm_pos = match_template(screen, tpl_path, threshold=0.5)
-            if confirm_pos:
-                break
+        from backend.vision.ocr import find_text
+        confirm_pos = find_text(screen, "Confirm")
         if confirm_pos:
-            await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
+            # Tap slightly below the text center (button extends downward)
+            await human_tap(adb, confirm_pos[0], confirm_pos[1] + 20, sigma=5)
             await human_delay(0.5, 1.0)
         else:
-            # Fallback to calibrated ROI
-            with get_session() as session:
-                confirm_roi = session.query(RoiTemplate).filter_by(roi_name="btn_confirm_upgrade").first()
-            if confirm_roi:
-                cx = confirm_roi.x_pos + confirm_roi.width // 2
-                cy = confirm_roi.y_pos + confirm_roi.height // 2
-                await human_tap(adb, cx, cy, sigma=3)
+            # Fallback: template matching, then calibrated ROI
+            confirm_pos = None
+            for tpl_path in self._TPL_CONFIRM:
+                confirm_pos = match_template(screen, tpl_path, threshold=0.5)
+                if confirm_pos:
+                    break
+            if confirm_pos:
+                await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
                 await human_delay(0.5, 1.0)
             else:
-                logger.warning("Confirm button not found")
-                self._upgrade_target = None
-                return
+                # Last fallback: calibrated ROI
+                with get_session() as session:
+                    confirm_roi = session.query(RoiTemplate).filter_by(
+                        roi_name="btn_confirm_upgrade").first()
+                if confirm_roi:
+                    cx = confirm_roi.x_pos + confirm_roi.width // 2
+                    cy = confirm_roi.y_pos + confirm_roi.height // 2
+                    await human_tap(adb, cx, cy, sigma=5)
+                    await human_delay(0.5, 1.0)
+                else:
+                    logger.warning("Confirm button not found (OCR + template + ROI)")
+                    self._upgrade_target = None
+                    return
 
         logger.info("Upgrade started: %s (cost=%d %s)",
                      bld["name"], bld["cost"], bld["resource"])
