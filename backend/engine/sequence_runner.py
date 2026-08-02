@@ -28,6 +28,10 @@ class SequenceRunner:
         self.elixir_earned = 0
         self.dark_elixir_earned = 0
         self.raids_completed = 0
+        self.current_gold = 0
+        self.current_elixir = 0
+        self.current_dark_elixir = 0
+        self.current_gems = 0
         self._upgrade_target = None  # {name, x, y, cost, resource} from AI
         self._ai_client = None  # lazy-init DashScope client
 
@@ -43,6 +47,10 @@ class SequenceRunner:
             "elixir_earned": self.elixir_earned,
             "dark_elixir_earned": self.dark_elixir_earned,
             "raids_completed": self.raids_completed,
+            "current_gold": self.current_gold,
+            "current_elixir": self.current_elixir,
+            "current_dark_elixir": self.current_dark_elixir,
+            "current_gems": self.current_gems,
         }
 
     async def start(self, sequence_id: int | None = None):
