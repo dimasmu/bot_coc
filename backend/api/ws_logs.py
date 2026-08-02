@@ -20,8 +20,10 @@ class LogHandler(logging.Handler):
         self.queue: queue.Queue[dict] = queue.Queue(maxsize=max_size)
 
     def emit(self, record: logging.LogRecord):
+        from datetime import datetime
+        ts = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
         entry = {
-            "ts": self.formatTime(record, "%H:%M:%S"),
+            "ts": ts,
             "level": record.levelname,
             "name": record.name,
             "msg": self.format(record),
@@ -51,8 +53,8 @@ async def log_stream(websocket: WebSocket):
     await websocket.accept()
     logger.info("Log stream client connected")
 
-    filter_level = "INFO"
-    level_map = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+    filter_level = "ALL"
+    level_map = {"ALL": -1, "DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
 
     try:
         while True:

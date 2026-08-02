@@ -68,10 +68,11 @@ document.addEventListener("alpine:init", () => {
 
     // Logs
     logLines: [],
-    logFilter: "INFO",
+    logFilter: "ALL",
     wsLogs: null,
 
     get filteredLogLines() {
+      if (this.logFilter === 'ALL') return this.logLines;
       const lv = {DEBUG:0, INFO:1, WARNING:2, ERROR:3, CRITICAL:4};
       const min = lv[this.logFilter] ?? 1;
       return this.logLines.filter(line => (lv[line.level] ?? 1) >= min);
