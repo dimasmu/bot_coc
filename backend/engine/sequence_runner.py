@@ -122,6 +122,13 @@ class SequenceRunner:
             if self._running:
                 if current_mode != "farming":
                     current_mode = await self._evaluate_mode(adb)
+                else:
+                    # Lightweight: OCR builder count only, no AI
+                    await human_delay(0.5, 1.0)
+                    screen = await adb.screencap()
+                    if screen and self._read_builder_count(screen) > 0:
+                        current_mode = "upgrade"
+                        logger.info("Builder free — switching to upgrade loop")
                 self._loop_mode = current_mode
                 await self.read_current_resources()
 
