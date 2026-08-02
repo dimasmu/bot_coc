@@ -499,10 +499,10 @@ class SequenceRunner:
         from backend.vision.ocr import read_number
         from backend.vision.matching import match_template
 
-        # Gold and elixir: use DB ROI (same position at all TH levels)
         with get_session() as session:
             gold_roi = session.query(RoiTemplate).filter_by(roi_name="own_gold_number").first()
             elixir_roi = session.query(RoiTemplate).filter_by(roi_name="own_elixir_number").first()
+            de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
             gems_roi = session.query(RoiTemplate).filter_by(roi_name="own_gems_number").first()
 
         self.current_gold = (gold_roi and read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
@@ -510,19 +510,17 @@ class SequenceRunner:
         self.current_elixir = (elixir_roi and read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
             elixir_roi.width, elixir_roi.height, roi_name=elixir_roi.roi_name)) or 0
 
-        # Dark elixir: only exists at TH >= 7
+        # Dark elixir only exists at TH >= 7. When absent, gems occupies that position.
         de_tpl = f"{self._TPL_DIR}/icon_dark_elixir.png"
         if match_template(screen, de_tpl, threshold=0.5):
-            with get_session() as session:
-                de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
             self.current_dark_elixir = (de_roi and read_number(screen, de_roi.x_pos, de_roi.y_pos,
                 de_roi.width, de_roi.height, roi_name=de_roi.roi_name)) or 0
+            self.current_gems = (gems_roi and read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
+                gems_roi.width, gems_roi.height, roi_name=gems_roi.roi_name)) or 0
         else:
             self.current_dark_elixir = 0
-
-        # Gems: use DB ROI (may need recalibration when DE absent)
-        self.current_gems = (gems_roi and read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
-            gems_roi.width, gems_roi.height, roi_name=gems_roi.roi_name)) or 0
+            self.current_gems = (de_roi and read_number(screen, de_roi.x_pos, de_roi.y_pos,
+                de_roi.width, de_roi.height, roi_name=de_roi.roi_name)) or 0
 
         logger.info("Resources read: G=%d E=%d DE=%d Gems=%d",
             self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
