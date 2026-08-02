@@ -74,6 +74,39 @@ def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
         return None
 
 
+def read_raw_text(screenshot: bytes, x: int, y: int, width: int, height: int) -> str:
+    """Read raw text from a region using EasyOCR (no digit filter).
+
+    Performs the same preprocessing as read_number() but returns the full
+    OCR text without restricting to digits. Used for reading formatted
+    labels like builder count "2/5".
+    """
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+
+        x1 = max(0, x)
+        y1 = max(0, y)
+        x2 = min(w, x + width)
+        y2 = min(h, y + height)
+
+        if x2 <= x1 or y2 <= y1:
+            return ""
+
+        roi = img[y1:y2, x1:x2]
+        roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+
+        reader = _get_reader()
+        results = reader.readtext(roi, detail=0, paragraph=True)
+        text = " ".join(results).strip() if results else ""
+        logger.debug("EasyOCR raw text: '%s'", text)
+        return text
+    except Exception as e:
+        logger.error("EasyOCR read_raw_text failed: %s", e)
+        return ""
+
+
 def read_card_badge(screenshot: bytes, card_x: int, card_top: int) -> int | None:
     """Read the troop/spell count from a card's badge region.
 

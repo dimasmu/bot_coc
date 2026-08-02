@@ -473,30 +473,18 @@ class SequenceRunner:
             self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
 
     def _read_builder_count(self, screen) -> int:
-        """OCR builder count from format 'X/Y' (e.g. '2/5'). Defaults to 1 if misread."""
-        import re
-        from backend.vision.ocr import _get_reader
+        """OCR free builder count from format 'X/Y' (e.g. '2/5'). Defaults to 1 if misread."""
+        from backend.vision.ocr import read_raw_text, read_number
 
         with get_session() as session:
             builder_roi = session.query(RoiTemplate).filter_by(roi_name="builder_count").first()
         if not builder_roi:
             return 1
 
-        nparr = np.frombuffer(screen, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        h_img, w_img = img.shape[:2]
-        x1 = max(0, builder_roi.x_pos)
-        y1 = max(0, builder_roi.y_pos)
-        x2 = min(w_img, x1 + builder_roi.width)
-        y2 = min(h_img, y1 + builder_roi.height)
-        roi = img[y1:y2, x1:x2]
-        roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
-
-        reader = _get_reader()
-        results = reader.readtext(roi, detail=0, paragraph=True)
-        text = " ".join(results).strip() if results else ""
-
-        m = re.search(r'(\d+)\s*/\s*\d+', text)
+        # Primary: read full text (e.g. "2/5") via EasyOCR without digit filter
+        text = read_raw_text(screen, builder_roi.x_pos, builder_roi.y_pos,
+                             builder_roi.width, builder_roi.height)
+        m = re.search(r'(\d+)\s*/\s*\d+', text) if text else None
         if m:
             bc = int(m.group(1))
             if bc > 6:
@@ -506,7 +494,6 @@ class SequenceRunner:
             return bc
 
         # Fallback: legacy digit-only OCR
-        from backend.vision.ocr import read_number
         bc = read_number(screen, builder_roi.x_pos, builder_roi.y_pos,
                          builder_roi.width, builder_roi.height, roi_name="builder_count")
         if bc is None:
