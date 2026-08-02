@@ -467,6 +467,53 @@ class SequenceRunner:
     _TPL_CONFIRM = [f"{_TPL_DIR}/btn_upgrade_confirm_1.png",
                     f"{_TPL_DIR}/btn_upgrade_confirm_2.png"]
 
+    def _read_resource(self, screen: bytes, tpl_name: str, roi_name: str,
+                       offset_x: int = 35, width: int = 200, required: bool = True) -> int | None:
+        """Read a resource number using icon template matching with DB ROI fallback.
+
+        Uses template matching to find the resource icon, then OCRs the
+        number to the right of it. This handles different TH levels where
+        the UI layout changes (e.g. no dark elixir at low TH).
+
+        Args:
+            screen: PNG screenshot bytes.
+            tpl_name: Template filename (e.g. 'icon_gold.png').
+            roi_name: Fallback ROI name in DB.
+            offset_x: Pixels to the right of icon center for the number.
+            width: Width of the number region.
+            required: If False, returns 0 when icon not found instead of falling
+                      back to ROI (used for dark elixir at low TH levels).
+
+        Returns:
+            Resource value as int, or None if not found.
+        """
+        from backend.vision.ocr import read_number
+        from backend.vision.matching import match_template
+
+        tpl_path = f"{self._TPL_DIR}/{tpl_name}"
+        pos = match_template(screen, tpl_path, threshold=0.7)
+        if pos:
+            x = pos[0] + offset_x
+            y = pos[1] - 15
+            val = read_number(screen, x, y, width, 30)
+            if val is not None:
+                logger.debug("Resource %s via template: %d", tpl_name, val)
+                return val
+
+        if not required:
+            logger.debug("Resource %s not found (optional), returning 0", tpl_name)
+            return 0
+
+        # Fallback: use calibrated DB ROI
+        logger.debug("Template %s not matched, using ROI fallback %s", tpl_name, roi_name)
+        with get_session() as session:
+            roi = session.query(RoiTemplate).filter_by(roi_name=roi_name).first()
+        if roi:
+            val = read_number(screen, roi.x_pos, roi.y_pos, roi.width, roi.height,
+                              roi_name=roi.roi_name)
+            return val or 0
+        return 0
+
     def _read_resources(self, screen) -> dict:
         """OCR gold, elixir, and dark elixir from own base screen."""
         from backend.vision.ocr import read_number
@@ -483,7 +530,12 @@ class SequenceRunner:
         return {"gold": gold or 0, "elixir": elixir or 0, "dark_elixir": de or 0}
 
     async def read_current_resources(self):
-        """Take a screenshot and OCR own-base resources into instance variables."""
+        """Take a screenshot and OCR own-base resources into instance variables.
+
+        Uses icon template matching to find resource positions dynamically,
+        which handles different TH levels where UI layout changes.
+        Falls back to calibrated ROI if template not found.
+        """
         adb = adb_manager
         if not adb.is_connected:
             return
@@ -491,21 +543,14 @@ class SequenceRunner:
         if not screen:
             return
 
-        from backend.vision.ocr import read_number
-        with get_session() as session:
-            gold_roi = session.query(RoiTemplate).filter_by(roi_name="own_gold_number").first()
-            elixir_roi = session.query(RoiTemplate).filter_by(roi_name="own_elixir_number").first()
-            de_roi = session.query(RoiTemplate).filter_by(roi_name="own_dark_elixir_number").first()
-            gems_roi = session.query(RoiTemplate).filter_by(roi_name="own_gems_number").first()
-
-        self.current_gold = (gold_roi and read_number(screen, gold_roi.x_pos, gold_roi.y_pos,
-            gold_roi.width, gold_roi.height, roi_name=gold_roi.roi_name)) or 0
-        self.current_elixir = (elixir_roi and read_number(screen, elixir_roi.x_pos, elixir_roi.y_pos,
-            elixir_roi.width, elixir_roi.height, roi_name=elixir_roi.roi_name)) or 0
-        self.current_dark_elixir = (de_roi and read_number(screen, de_roi.x_pos, de_roi.y_pos,
-            de_roi.width, de_roi.height, roi_name=de_roi.roi_name)) or 0
-        self.current_gems = (gems_roi and read_number(screen, gems_roi.x_pos, gems_roi.y_pos,
-            gems_roi.width, gems_roi.height, roi_name=gems_roi.roi_name)) or 0
+        self.current_gold = self._read_resource(screen, "icon_gold.png",
+            roi_name="own_gold_number", offset_x=35, width=200) or 0
+        self.current_elixir = self._read_resource(screen, "icon_elixir.png",
+            roi_name="own_elixir_number", offset_x=35, width=200) or 0
+        self.current_dark_elixir = self._read_resource(screen, "icon_dark_elixir.png",
+            roi_name="own_dark_elixir_number", offset_x=35, width=200, required=False) or 0
+        self.current_gems = self._read_resource(screen, "icon_gems.png",
+            roi_name="own_gems_number", offset_x=35, width=200) or 0
 
         logger.info("Resources read: G=%d E=%d DE=%d Gems=%d",
             self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
