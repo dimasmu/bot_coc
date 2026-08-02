@@ -510,6 +510,40 @@ class SequenceRunner:
         logger.info("Resources read: G=%d E=%d DE=%d Gems=%d",
             self.current_gold, self.current_elixir, self.current_dark_elixir, self.current_gems)
 
+        # Gold maxed detection
+        if self.current_gold > 0 and self.current_gold == self._prev_gold:
+            self._gold_stable += 1
+            if self._gold_stable >= 2:
+                self._gold_max = True
+        else:
+            self._gold_stable = 0
+            self._gold_max = False
+        self._prev_gold = self.current_gold
+
+        # Elixir maxed detection
+        if self.current_elixir > 0 and self.current_elixir == self._prev_elixir:
+            self._elixir_stable += 1
+            if self._elixir_stable >= 2:
+                self._elixir_max = True
+        else:
+            self._elixir_stable = 0
+            self._elixir_max = False
+        self._prev_elixir = self.current_elixir
+
+        # Dark elixir maxed detection
+        if self.current_dark_elixir > 0 and self.current_dark_elixir == self._prev_dark_elixir:
+            self._de_stable += 1
+            if self._de_stable >= 2:
+                self._dark_elixir_max = True
+        else:
+            self._de_stable = 0
+            self._dark_elixir_max = False
+        self._prev_dark_elixir = self.current_dark_elixir
+
+        if self._gold_max or self._elixir_max or self._dark_elixir_max:
+            logger.info("Maxed resources: Gold=%s Elixir=%s DE=%s",
+                self._gold_max, self._elixir_max, self._dark_elixir_max)
+
     def _read_builder_count(self, screen) -> int:
         """OCR free builder count from format 'X/Y' (e.g. '2/5'). Defaults to 1 if misread."""
         import re
