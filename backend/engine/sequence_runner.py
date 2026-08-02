@@ -825,6 +825,17 @@ class SequenceRunner:
                     self._upgrade_target = None
                     return
 
+        # Phase 3b: Dismiss hero hall confirmation popup if present
+        # Hero upgrades have a second confirmation layer that needs dismissal
+        await human_delay(0.5, 1.0)
+        with get_session() as session:
+            close_roi = session.query(RoiTemplate).filter_by(roi_name="btn_close_universal").first()
+        if close_roi:
+            cx = close_roi.x_pos + close_roi.width // 2
+            cy = close_roi.y_pos + close_roi.height // 2
+            await human_tap(adb, cx, cy, sigma=5)
+            logger.info("Tapped btn_close_universal at (%d,%d)", cx, cy)
+
         logger.info("Upgrade started: %s (cost=%d %s)",
                      bld["name"], bld["cost"], bld["resource"])
         self._upgrade_target = None
