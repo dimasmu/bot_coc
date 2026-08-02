@@ -408,8 +408,8 @@ class SequenceRunner:
     _TPL_SUGGESTION = f"{_TPL_DIR}/btn_upgrade_suggestion.png"
     _TPL_HAMMER = f"{_TPL_DIR}/btn_upgrade_hammer.png"
     _TPL_COG = f"{_TPL_DIR}/cog_upgrade.png"
-    _TPL_UPGRADE_BTNS = [f"{_TPL_DIR}/btn_upgrade_hammer.png",
-                         f"{_TPL_DIR}/cog_upgrade.png"]
+    _TPL_UPGRADE_BTNS = [f"{_TPL_DIR}/hammer_upgrade-removebg.png",
+                         f"{_TPL_DIR}/cog_upgrade-removebg.png"]
     _TPL_CONFIRM = [f"{_TPL_DIR}/btn_upgrade_confirm_1.png",
                     f"{_TPL_DIR}/btn_upgrade_confirm_2.png"]
 
