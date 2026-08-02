@@ -55,6 +55,7 @@ def init_db():
         ("builder_menu", "tap", 70, 575, 100, 80),
         ("upgrade_cost", "read", 340, 310, 120, 35),
         ("builder_count", "read", 10, 550, 35, 30),
+        ("own_gems_number", "read", 1078, 195, 80, 30),
     ]
     with Session(engine) as session:
         for name, rtype, x, y, w, h in roi_defaults:
