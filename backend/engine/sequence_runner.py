@@ -859,46 +859,27 @@ class SequenceRunner:
                 return
 
     async def _do_return_home(self, adb):
-        """Find and tap return-home button using color detection.
+        """Tap the return-home button using calibrated ROI coordinates.
 
-        Post-battle screens show a colored button (red/pink) in the
-        bottom-center area. Uses HSV color filtering instead of template
-        matching because event skins change the button appearance.
-        Falls back to calibrated ROI if no colored region found.
+        The button position is fixed relative to 1280x720 resolution.
+        Calibrate via the Calibrator tab (btn_return_home ROI).
+        Falls back to hardcoded center-bottom if ROI not found.
         """
         self.state = "RETURNING"
-        logger.info("Returning home — polling for button...")
+        logger.info("Returning home — tapping return home button...")
 
-        MAX_POLLS = 25  # 25 × 3s = 75s max wait
-
-        for attempt in range(1, MAX_POLLS + 1):
-            screen = await adb.screencap()
-            if not screen:
-                await asyncio.sleep(3)
-                continue
-
-            pos = self._find_colored_button(screen)
-            if pos:
-                await human_tap(adb, pos[0], pos[1], sigma=10)
-                logger.info("Return home button found at (%d,%d) (attempt %d, %s)",
-                             pos[0], pos[1], attempt, "color" if isinstance(pos, tuple) else "")
-                break
-            logger.debug("Return home button not yet visible (attempt %d/%d), waiting 3s...",
-                         attempt, MAX_POLLS)
-            await asyncio.sleep(3)
+        with get_session() as session:
+            from backend.db.models import RoiTemplate
+            home_roi = session.query(RoiTemplate).filter_by(roi_name="btn_return_home").first()
+        if home_roi:
+            cx = home_roi.x_pos + home_roi.width // 2
+            cy = home_roi.y_pos + home_roi.height // 2
+            logger.info("Return home at (%d,%d) via calibrated ROI", cx, cy)
         else:
-            # Fallback: calibrated ROI or center-bottom
-            logger.warning("Return home button not found after %ds, using fallback", MAX_POLLS * 3)
-            with get_session() as session:
-                from backend.db.models import RoiTemplate
-                home_roi = session.query(RoiTemplate).filter_by(roi_name="btn_return_home").first()
-            if home_roi:
-                cx = home_roi.x_pos + home_roi.width // 2
-                cy = home_roi.y_pos + home_roi.height // 2
-                await human_tap(adb, cx, cy, sigma=20)
-            else:
-                await human_tap(adb, 640, 650, sigma=20)
+            cx, cy = 640, 650
+            logger.info("Return home at (%d,%d) via fallback", cx, cy)
 
+        await human_tap(adb, cx, cy, sigma=15)
         await human_delay(3.0, 5.0)
 
         # Log attack
@@ -918,74 +899,6 @@ class SequenceRunner:
             pass
 
         self.state = "RUNNING"
-
-    def _find_colored_button(self, screen: bytes) -> tuple[int, int] | None:
-        """Detect a colored button in the bottom-center area using HSV.
-
-        The return-home/post-battle button is always colored (red/pink/orange)
-        against a dark background in the bottom-center of the screen.
-        Event skins change the exact shape but the color region is consistent.
-
-        Args:
-            screen: PNG bytes (1280x720).
-
-        Returns:
-            (x, y) center of the colored region, or None.
-        """
-        nparr = np.frombuffer(screen, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        h, w = img.shape[:2]
-
-        # Crop bottom-center: where return-home / post-battle button lives
-        crop_x1, crop_y1 = 300, 480
-        crop_x2, crop_y2 = 980, 720
-        roi = img[crop_y1:crop_y2, crop_x1:crop_x2]
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-        # Red/pink: two hue ranges (wraps around 0/180 in OpenCV)
-        lower_red1 = np.array([0, 80, 80])
-        upper_red1 = np.array([15, 255, 255])
-        lower_red2 = np.array([160, 80, 80])
-        upper_red2 = np.array([180, 255, 255])
-
-        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-        mask = cv2.bitwise_or(mask1, mask2)
-
-        # Also try orange/gold range (some event buttons)
-        lower_orange = np.array([15, 80, 80])
-        upper_orange = np.array([35, 255, 255])
-        mask3 = cv2.inRange(hsv, lower_orange, upper_orange)
-        mask = cv2.bitwise_or(mask, mask3)
-
-        # Morphological cleanup: fill small gaps, remove noise
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-        # Find largest contour
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
-
-        largest = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(largest)
-
-        # Need a reasonably-sized colored region (at least 2000 px²)
-        if area < 2000:
-            return None
-
-        x, y, bw, bh = cv2.boundingRect(largest)
-        colored_px = cv2.countNonZero(mask[y:y+bh, x:x+bw])
-        fill_pct = colored_px / (bw * bh) if bw * bh > 0 else 0
-
-        logger.info("Colored button: area=%d, fill=%.0f%%, at (%d,%d) %dx%d",
-                     area, fill_pct * 100,
-                     crop_x1 + x + bw // 2, crop_y1 + y + bh // 2, bw, bh)
-
-        cx = crop_x1 + x + bw // 2
-        cy = crop_y1 + y + bh // 2
-        return (cx, cy)
 
 
 sequence_runner = SequenceRunner()
