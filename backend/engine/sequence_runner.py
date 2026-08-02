@@ -499,12 +499,11 @@ class SequenceRunner:
                           roi_name=roi.roi_name) or 0
 
         if val > MAX_RESOURCE:
-            logger.warning("%s OCR misread: %d (label noise?), retrying with offset", label, val)
-            # Skip ~30% from left to avoid icon/label, keep the number on right
+            logger.warning("%s OCR misread: %d, retrying without padding", label, val)
+            # Retry WITHOUT roi_name so _get_padding doesn't add 80px right padding
             offset = int(roi.width * 0.3)
             val = read_number(screen, roi.x_pos + offset, roi.y_pos,
-                              max(1, roi.width - offset), roi.height,
-                              roi_name=roi.roi_name) or 0
+                              max(1, roi.width - offset), roi.height) or 0
             if val > MAX_RESOURCE:
                 logger.error("%s still > %d after retry: %d", label, MAX_RESOURCE, val)
                 val = 0
