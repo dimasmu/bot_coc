@@ -58,9 +58,12 @@ def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
         roi = img[y1:y2, x1:x2]
         # Scale up 2x for small text
         roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+        # Convert to grayscale — color backgrounds (yellow gold, pink elixir)
+        # can confuse OCR due to low text-to-background contrast
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
         reader = _get_reader()
-        results = reader.readtext(roi, detail=0)
+        results = reader.readtext(gray, detail=0)
         if results:
             logger.info("EasyOCR %s raw: %r", roi_name or "generic", results)
         for r in results:

@@ -6,11 +6,11 @@ export default defineConfig({
   server: {
     proxy: {
       "/ws": {
-        target: "ws://127.0.0.1:8000",
+        target: "ws://127.0.0.1:8088",
         ws: true,
       },
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8088",
       },
     },
   },

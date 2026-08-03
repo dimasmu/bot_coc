@@ -94,13 +94,40 @@ def test_check_badge_texture_invalid_bounds():
     assert white_pct == 0.0
 
 
-# ----- Integration tests for SequenceRunner -----
+# ----- Integration tests for SequenceRunner card depletion detection -----
 
 import asyncio
 import pytest
 
 from backend.adb.mock import MockAdbManager
-from backend.engine.sequence_runner import SequenceRunner, CardResult
+from backend.engine.sequence_runner import SequenceRunner
+
+
+def _make_screen_with_card(card_x: int = 380, card_top: int = 635,
+                           grey: bool = False) -> bytes:
+    """Create a 1280x720 BGR screenshot with a card at the given position.
+
+    If grey=True, card uses uniform grey pixels (depleted).
+    If grey=False, card has colourful pixels (active).
+    """
+    img = np.zeros((720, 1280, 3), dtype=np.uint8)
+    card_x1 = card_x - 30
+    card_y1 = card_top
+
+    if grey:
+        # Uniform grey overlay (depleted card)
+        img[card_y1:card_y1 + 85, card_x1:card_x1 + 60] = (80, 80, 80)
+    else:
+        # Colorful card (active) — non-uniform, saturated colors
+        # Use brown/dark card base (not black — black=S=0 in HSV)
+        img[card_y1:card_y1 + 85, card_x1:card_x1 + 60] = (15, 40, 60)
+        # Add colourful patches simulating troop icon
+        img[card_y1+5:card_y1+50, card_x1+5:card_x1+55] = (30, 160, 240)  # bright orange
+        img[card_y1+30:card_y1+70, card_x1+8:card_x1+28] = (220, 40, 10)  # deep blue
+        img[card_y1+20:card_y1+60, card_x1+30:card_x1+55] = (20, 220, 80)  # bright green
+
+    _, buf = cv2.imencode(".png", img)
+    return buf.tobytes()
 
 
 @pytest.fixture
@@ -110,59 +137,63 @@ def runner():
 
 
 @pytest.mark.asyncio
-async def test_read_card_count_returns_card_result(runner):
-    """_read_card_count should always return a CardResult, never raise."""
-    mock = MockAdbManager()
-    card = {"x": 380, "y": 677, "card_top": 635}
+async def test_is_card_depleted_active_card(runner):
+    """An active (colourful) card should NOT be detected as depleted."""
+    active_screen = _make_screen_with_card(grey=False)
 
-    result = await runner._read_card_count(mock, card)
-    assert isinstance(result, CardResult)
-    assert hasattr(result, "count")
-    assert hasattr(result, "has_badge")
+    class ActiveAdb(MockAdbManager):
+        async def screencap(self):
+            return active_screen
+
+    card = {"x": 380, "y": 677, "card_top": 635}
+    result = await runner._is_card_depleted(ActiveAdb(), card)
+    assert result is False
 
 
 @pytest.mark.asyncio
-async def test_read_card_count_no_screencap():
-    """When screencap fails (returns None), should return CardResult with has_badge=False."""
-    runner = SequenceRunner()
+async def test_is_card_depleted_grey_card(runner):
+    """A grey (depleted) card SHOULD be detected as depleted."""
+    grey_screen = _make_screen_with_card(grey=True)
 
+    class GreyAdb(MockAdbManager):
+        async def screencap(self):
+            return grey_screen
+
+    card = {"x": 380, "y": 677, "card_top": 635}
+    result = await runner._is_card_depleted(GreyAdb(), card)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_is_card_depleted_no_screencap(runner):
+    """When screencap fails (returns None), should return False (safe default)."""
     class NoScreenAdb:
         is_connected = True
         async def connect(self): return True
         async def screencap(self): return None
 
     card = {"x": 380, "y": 677, "card_top": 635}
-    result = await runner._read_card_count(NoScreenAdb(), card)
-    assert isinstance(result, CardResult)
-    assert result.has_badge is False
-    assert result.count is None
+    result = await runner._is_card_depleted(NoScreenAdb(), card)
+    assert result is False
 
 
-def test_card_result_dataclass():
-    """CardResult should be constructable and have correct defaults."""
-    r1 = CardResult(count=3, has_badge=True)
-    assert r1.count == 3
-    assert r1.has_badge is True
-
-    r2 = CardResult(count=None, has_badge=False)
-    assert r2.count is None
-    assert r2.has_badge is False
-
-    r3 = CardResult(count=0, has_badge=True)
-    assert r3.count == 0
-    assert r3.has_badge is True
+@pytest.mark.asyncio
+async def test_is_card_depleted_returns_bool(runner):
+    """_is_card_depleted should always return a bool, never raise."""
+    mock = MockAdbManager()
+    card = {"x": 380, "y": 677, "card_top": 635}
+    result = await runner._is_card_depleted(mock, card)
+    assert isinstance(result, bool)
 
 
 @pytest.mark.asyncio
 async def test_do_attack_no_cards():
     """_do_attack with no detected cards should wait and return."""
     runner = SequenceRunner()
-    runner._running = False  # prevent loop
+    runner._running = False  # prevent deploy loop
 
     class NoCardAdb(MockAdbManager):
         async def screencap(self):
-            import cv2
-            import numpy as np
             img = np.zeros((720, 1280, 3), dtype=np.uint8)
             _, buf = cv2.imencode(".png", img)
             return buf.tobytes()

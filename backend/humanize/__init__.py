@@ -56,14 +56,12 @@ def bezier_swipe_points(
 
 
 async def human_swipe(adb, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 500):
-    """Execute a human-like swipe using Bezier curve path via ADB input swipe."""
+    """Execute a human-like swipe via ADB input swipe."""
     import asyncio
-    # ADB swipe is instantaneous, so we just use it directly with Bezier endpoints
-    # The curve variation comes from randomizing the start/end slightly
-    sx, sy = gaussian_offset(start_x, end_y, sigma=3)
+    sx, sy = gaussian_offset(start_x, start_y, sigma=3)
     ex, ey = gaussian_offset(end_x, end_y, sigma=3)
-    await asyncio.get_running_loop().run_in_executor(
-        None,
-        lambda: adb._device.shell(f"input swipe {sx} {sy} {ex} {ey} {duration_ms}"),
+    await adb._run_adb(
+        "-s", adb._serial, "shell", "input", "swipe",
+        str(sx), str(sy), str(ex), str(ey), str(duration_ms),
     )
     await human_delay(0.1, 0.3)

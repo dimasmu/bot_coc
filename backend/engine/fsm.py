@@ -196,44 +196,16 @@ class FsmController:
         self.transition(BotState.MAIN_BASE)
 
     async def _state_main_base(self):
-        """Main base: collect collectors, dismiss popups, check army."""
+        """Main base: dismiss popups, check army readiness."""
         from backend.humanize import human_tap, human_delay
-        from backend.vision.matching import find_template_in_roi
-        from backend.db.database import get_session
-        from backend.db.models import RoiTemplate
 
-        logger.info("FSM: MAIN_BASE -- collecting resources")
+        logger.info("FSM: MAIN_BASE -- checking village")
 
-        # Tap collectors (approximate positions -- will be calibrated via ROI tool)
-        collector_positions = [
-            (70, 380), (70, 460), (70, 540),
-            (70, 620),
-        ]
-        for x, y in collector_positions:
-            await human_tap(self.adb, x, y, sigma=10)
-            await human_delay(0.3, 0.8)
-
-        # Dismiss any popups (tap center of screen)
-        await human_tap(self.adb, 640, 400, sigma=50)
+        # Dismiss any popups/trader offers (tap center of screen)
+        await human_tap(self.adb, 640, 400, sigma=80)
         await human_delay(0.5, 1.0)
 
-        # Check army readiness -- look for attack button ROI
-        with get_session() as session:
-            attack_roi = session.query(RoiTemplate).filter_by(roi_name="btn_attack").first()
-
-        if attack_roi:
-            screen = await self.adb.screencap()
-            if screen:
-                pos = find_template_in_roi(screen, attack_roi.x_pos, attack_roi.y_pos, attack_roi.width, attack_roi.height)
-                if pos:
-                    logger.info("FSM: Army appears ready")
-                    self.transition(BotState.SEARCHING)
-                else:
-                    logger.info("FSM: Army not ready, entering training")
-                    self.transition(BotState.TRAINING)
-                return
-
-        # Fallback: if no attack ROI calibration, just proceed
+        # Go straight to attack sequence — skip collector tapping
         self.transition(BotState.SEARCHING)
 
     async def _state_training(self):
@@ -267,23 +239,49 @@ class FsmController:
         from backend.db.database import get_session
         from backend.db.models import RoiTemplate, Config
 
-        logger.info("FSM: SEARCHING -- tapping Find Match")
+        logger.info("FSM: SEARCHING -- tapping buttons via calibrated ROIs")
 
-        # Tap Attack button
-        await human_tap(self.adb, 70, 580, sigma=5)
-        await human_delay(2.0, 3.0)
+        # Tap Attack button - use calibrated ROI center
+        attack_roi = session.query(RoiTemplate).filter_by(roi_name="btn_attack").first() if 'session' in dir() else None
 
-        # Tap Find Match
-        await human_tap(self.adb, 640, 600, sigma=10)
-        await human_delay(5.0, 8.0)  # Wait for match search
-
-        # Get thresholds from config
         with get_session() as session:
-            min_gold = int(session.query(Config).filter_by(key="min_gold_threshold").first().value) if session.query(Config).filter_by(key="min_gold_threshold").first() else 300000
-            min_elixir = int(session.query(Config).filter_by(key="min_elixir_threshold").first().value) if session.query(Config).filter_by(key="min_elixir_threshold").first() else 300000
+            attack_roi = session.query(RoiTemplate).filter_by(roi_name="btn_attack").first()
+            find_roi = session.query(RoiTemplate).filter_by(roi_name="btn_find_match").first()
             gold_roi = session.query(RoiTemplate).filter_by(roi_name="gold_number").first()
             elixir_roi = session.query(RoiTemplate).filter_by(roi_name="elixir_number").first()
             next_roi = session.query(RoiTemplate).filter_by(roi_name="btn_next").first()
+
+            min_gold_th = session.query(Config).filter_by(key="min_gold_threshold").first()
+            min_elixir_th = session.query(Config).filter_by(key="min_elixir_threshold").first()
+            min_gold = int(min_gold_th.value) if min_gold_th else 300000
+            min_elixir = int(min_elixir_th.value) if min_elixir_th else 300000
+
+        # Tap Attack button using calibrated ROI center
+        if attack_roi:
+            ax = attack_roi.x_pos + attack_roi.width // 2
+            ay = attack_roi.y_pos + attack_roi.height // 2
+            await human_tap(self.adb, ax, ay, sigma=5)
+        else:
+            await human_tap(self.adb, 70, 580, sigma=5)
+        await human_delay(2.0, 3.0)
+
+        # Tap Find Match using calibrated ROI center
+        if find_roi:
+            fx = find_roi.x_pos + find_roi.width // 2
+            fy = find_roi.y_pos + find_roi.height // 2
+            await human_tap(self.adb, fx, fy, sigma=10)
+        else:
+            await human_tap(self.adb, 640, 600, sigma=10)
+        await human_delay(5.0, 8.0)  # Wait for match search
+
+        # Tap "Attack" button on army confirmation screen
+        with get_session() as session:
+            army_atk_roi = session.query(RoiTemplate).filter_by(roi_name="myarmy_btn_attack").first()
+        if army_atk_roi:
+            mx = army_atk_roi.x_pos + army_atk_roi.width // 2
+            my = army_atk_roi.y_pos + army_atk_roi.height // 2
+            await human_tap(self.adb, mx, my, sigma=5)
+        await human_delay(2.0, 4.0)  # Wait for match to be found
 
         # Search loop: read loot, Next if below threshold
         search_count = 0
@@ -426,24 +424,18 @@ class FsmController:
         if self.adb.is_connected:
             # Force stop CoC
             try:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.adb._device.shell(
-                        "am force-stop com.supercell.clashofclans"
-                    ),
+                await self.adb._run_adb(
+                    "-s", self.adb._serial, "shell",
+                    "am", "force-stop", "com.supercell.clashofclans",
                 )
             except Exception:
                 pass
             # Relaunch
             try:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.adb._device.shell(
-                        "monkey -p com.supercell.clashofclans "
-                        "-c android.intent.category.LAUNCHER 1"
-                    ),
+                await self.adb._run_adb(
+                    "-s", self.adb._serial, "shell",
+                    "monkey", "-p", "com.supercell.clashofclans",
+                        "-c", "android.intent.category.LAUNCHER", "1",
                 )
             except Exception:
                 pass

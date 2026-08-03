@@ -32,12 +32,13 @@ class BlueStacks5Adapter(EmulatorAdapter):
         if sys.platform == "win32":
             try:
                 result = subprocess.run(
-                    ["tasklist", "/FI", "IMAGENAME eq HD-Player.exe"],
+                    'tasklist /FI "IMAGENAME eq HD-Player.exe"',
                     capture_output=True,
                     text=True,
+                    shell=True,
                 )
                 return "HD-Player.exe" in result.stdout
-            except FileNotFoundError:
+            except Exception:
                 return False
         return False
 
@@ -52,12 +53,13 @@ class BlueStacks4Adapter(EmulatorAdapter):
         if sys.platform == "win32":
             try:
                 result = subprocess.run(
-                    ["tasklist", "/FI", "IMAGENAME eq HD-Player.exe"],
+                    'tasklist /FI "IMAGENAME eq HD-Player.exe"',
                     capture_output=True,
                     text=True,
+                    shell=True,
                 )
                 return "HD-Player.exe" in result.stdout
-            except FileNotFoundError:
+            except Exception:
                 return False
         return False
 
@@ -72,12 +74,13 @@ class LDPlayerAdapter(EmulatorAdapter):
         if sys.platform == "win32":
             try:
                 result = subprocess.run(
-                    ["tasklist", "/FI", "IMAGENAME eq dnplayer.exe"],
+                    'tasklist /FI "IMAGENAME eq dnplayer.exe"',
                     capture_output=True,
                     text=True,
+                    shell=True,
                 )
                 return "dnplayer.exe" in result.stdout
-            except FileNotFoundError:
+            except Exception:
                 return False
         return False
 
@@ -108,10 +111,10 @@ def get_emulator_adapters(
     ]
 
     if host_override is not None:
-        generic = adapters[-1]
-        generic.adb_host = host_override
-        if port_override is not None:
-            generic.adb_port = port_override
-        adapters.insert(0, adapters.pop())
+        # Set host/port on ALL adapters, keep BS5 as first priority
+        for adapter in adapters:
+            adapter.adb_host = host_override
+            if port_override is not None:
+                adapter.adb_port = port_override
 
     return adapters

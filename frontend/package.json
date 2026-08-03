@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "alpinejs": "^3.14",
-    "chart.js": "^4.5.1"
+    "chart.js": "^4.5.1",
+    "preline": "^4.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0",

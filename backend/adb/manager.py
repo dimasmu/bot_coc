@@ -1,18 +1,51 @@
-"""ADB connection lifecycle manager with health checks and screencap."""
+"""ADB connection lifecycle manager using system ADB binary (subprocess)."""
 
 import asyncio
 import logging
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 
-from adb_shell.adb_device import AdbDeviceTcp
-from adb_shell.auth.sign_pythonrsa import PythonRSASigner
-from adb_shell.auth.keygen import keygen
-
-from backend.adb.emulators import EmulatorAdapter, get_emulator_adapters
+from backend.adb.emulators import get_emulator_adapters
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Possible ADB binary locations (checked in order)
+_ADB_PATHS = [
+    r"C:\Program Files\BlueStacks_nxt\HD-Adb.exe",
+]
+
+# Also check PATH
+_system_adb = shutil.which("adb")
+if _system_adb:
+    _ADB_PATHS.append(_system_adb)
+
+
+def _find_adb() -> str:
+    """Find the ADB binary. Returns the first found path."""
+    for path in _ADB_PATHS:
+        if os.path.isfile(path):
+            logger.debug("Using ADB: %s", path)
+            return path
+    raise RuntimeError(
+        "ADB binary not found. Install Android SDK Platform Tools or BlueStacks."
+    )
+
+
+ADB_BINARY = _find_adb()
+
+
+def _adb(args: list[str]) -> str:
+    """Run an ADB command synchronously (used in thread executor)."""
+    cmd = [ADB_BINARY] + args
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if stderr:
+            raise RuntimeError(stderr)
+    return result.stdout.strip()
 
 
 @dataclass
@@ -24,51 +57,27 @@ class AdbStatus:
 
 
 class AdbManager:
-    """Manages the lifecycle of an ADB connection to an Android emulator."""
+    """Manages ADB connection via system binary (subprocess)."""
 
     def __init__(self):
-        self._device: AdbDeviceTcp | None = None
-        self._signer: PythonRSASigner | None = None
-        self._adapter: EmulatorAdapter | None = None
+        self._serial: str | None = None
+        self._adapter_name: str = ""
         self.status = AdbStatus()
         self._lock = asyncio.Lock()
 
-    def _ensure_keys(self, key_path: str = "storage/adbkey") -> PythonRSASigner:
-        """Load or generate ADB RSA key pair."""
-        key_file = Path(key_path)
-        pub_file = Path(str(key_path) + ".pub")
-        if not key_file.exists() or not pub_file.exists():
-            key_file.parent.mkdir(parents=True, exist_ok=True)
-            keygen(str(key_file))
-            logger.info("Generated new ADB keypair at %s", key_file)
-
-        with open(key_file) as f:
-            priv = f.read()
-        with open(pub_file) as f:
-            pub = f.read()
-        return PythonRSASigner(pub, priv)
-
-    async def _run_shell(self, cmd: str, decode: bool = True) -> str | bytes:
-        """Run a shell command on the device via the executor."""
+    async def _run_adb(self, *args: str) -> str:
+        """Run an ADB command in a thread executor."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self._device.shell(cmd, decode=decode),
-        )
+        return await loop.run_in_executor(None, _adb, list(args))
 
     async def connect(
         self,
         host: str | None = None,
         port: int | None = None,
     ) -> bool:
-        """Connect to an emulator. Tries auto-detection, falls back to manual.
-
-        Returns True if connected successfully.
-        """
+        """Connect to an emulator. Tries auto-detection, falls back to manual."""
         async with self._lock:
-            await self._disconnect()
-
-            self._signer = self._ensure_keys()
+            await self._disconnect_unsafe()
 
             adapters = get_emulator_adapters(
                 host_override=host,
@@ -80,108 +89,123 @@ class AdbManager:
                     logger.debug("Skipping %s: not detected", adapter.name)
                     continue
 
-                logger.info("Trying %s at %s:%d ...", adapter.name, adapter.adb_host, adapter.adb_port)
-                try:
-                    device = AdbDeviceTcp(
-                        adapter.adb_host,
-                        adapter.adb_port,
-                        default_transport_timeout_s=9.0,
-                    )
-                    device.connect(rsa_keys=[self._signer], auth_timeout_s=0.1)
-                    self._device = device
-                    self._adapter = adapter
+                serial = adapter.get_device_serial()
+                logger.info("Connecting to %s ...", serial)
 
-                    resolution = await self._run_shell("wm size")
+                try:
+                    output = await self._run_adb("connect", serial)
+                    logger.info("Connect output: %s", output.strip())
+
+                    # Verify connection
+                    await self._run_adb("-s", serial, "shell", "echo", "ok")
+                    self._serial = serial
+                    self._adapter_name = adapter.name
+
+                    # Check resolution
+                    res = await self._run_adb("-s", serial, "shell", "wm", "size")
+                    logger.info("Resolution: %s", res.strip())
+
+                    # Enforce target resolution
+                    await self._run_adb(
+                        "-s", serial, "shell", "wm", "size",
+                        f"{settings.screen_width}x{settings.screen_height}",
+                    )
+                    await self._run_adb(
+                        "-s", serial, "shell", "wm", "density",
+                        str(settings.screen_dpi),
+                    )
+
                     self.status = AdbStatus(
                         connected=True,
                         emulator_name=adapter.name,
-                        serial=adapter.get_device_serial(),
-                        screen_size=resolution.strip(),
+                        serial=serial,
+                        screen_size=f"{settings.screen_width}x{settings.screen_height}",
                     )
-                    logger.info("Connected to %s (%s)", adapter.name, resolution.strip())
+                    logger.info("Connected to %s", adapter.name)
                     return True
 
                 except Exception as e:
-                    logger.warning("Failed to connect to %s: %s", adapter.name, e)
-                    try:
-                        device.close()
-                    except Exception:
-                        pass
-                    self._device = None
+                    logger.warning("Failed to connect: %s", e)
 
             self.status = AdbStatus()
             return False
 
-    async def _disconnect(self) -> None:
-        """Close the ADB connection (no lock -- for internal use)."""
-        if self._device is not None:
+    async def _disconnect_unsafe(self) -> None:
+        """Disconnect without acquiring lock (caller must hold lock)."""
+        if self._serial:
             try:
-                self._device.close()
+                await self._run_adb("disconnect", self._serial)
             except Exception:
                 pass
-            self._device = None
-            self._adapter = None
-            self.status = AdbStatus()
+        self._serial = None
+        self._adapter_name = ""
+        self.status = AdbStatus()
 
     async def disconnect(self) -> None:
         """Close the ADB connection."""
         async with self._lock:
-            await self._disconnect()
+            await self._disconnect_unsafe()
 
     async def screencap(self) -> bytes | None:
-        """Capture the device screen as PNG bytes.
-
-        Returns None if the capture fails.
-        """
-        async with self._lock:
-            if self._device is None:
-                return None
-
+        """Capture the device screen as PNG bytes."""
+        if self._serial is None:
+            return None
+        try:
             loop = asyncio.get_running_loop()
-            try:
-                return await loop.run_in_executor(
-                    None,
-                    lambda: self._device.shell("screencap -p", decode=False),
-                )
-            except Exception as e:
-                logger.error("screencap failed: %s", e)
+            cmd = [ADB_BINARY, "-s", self._serial, "exec-out", "screencap", "-p"]
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(cmd, capture_output=True, timeout=10),
+            )
+            if result.returncode != 0:
+                logger.error("screencap failed")
                 return None
+            return result.stdout
+        except Exception as e:
+            logger.error("screencap failed: %s", e)
+            return None
 
     async def set_resolution(self) -> bool:
         """Enforce target resolution on the device."""
-        async with self._lock:
-            if self._device is None:
-                return False
-            try:
-                await self._run_shell(f"wm size {settings.screen_width}x{settings.screen_height}")
-                await self._run_shell(f"wm density {settings.screen_dpi}")
-                return True
-            except Exception as e:
-                logger.error("Failed to set resolution: %s", e)
-                return False
+        if self._serial is None:
+            return False
+        try:
+            await self._run_adb(
+                "-s", self._serial, "shell", "wm", "size",
+                f"{settings.screen_width}x{settings.screen_height}",
+            )
+            await self._run_adb(
+                "-s", self._serial, "shell", "wm", "density",
+                str(settings.screen_dpi),
+            )
+            return True
+        except Exception as e:
+            logger.error("Failed to set resolution: %s", e)
+            return False
 
     async def tap(self, x: int, y: int) -> bool:
-        """Tap at coordinates."""
-        async with self._lock:
-            if self._device is None:
-                return False
-            try:
-                await self._run_shell(f"input tap {x} {y}")
-                return True
-            except Exception as e:
-                logger.error("tap failed: %s", e)
-                return False
+        """Tap at coordinates via ADB input tap."""
+        if self._serial is None:
+            return False
+        try:
+            await self._run_adb(
+                "-s", self._serial, "shell", "input", "tap",
+                str(x), str(y),
+            )
+            return True
+        except Exception as e:
+            logger.error("tap failed: %s", e)
+            return False
 
     async def health_check(self) -> bool:
-        """Check if the ADB connection is still alive."""
-        async with self._lock:
-            if self._device is None:
-                return False
-            try:
-                await self._run_shell("echo ok")
-                return True
-            except Exception:
-                return False
+        """Check if ADB connection is alive."""
+        if self._serial is None:
+            return False
+        try:
+            await self._run_adb("-s", self._serial, "shell", "echo", "ok")
+            return True
+        except Exception:
+            return False
 
     @property
     def is_connected(self) -> bool:
