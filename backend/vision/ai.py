@@ -112,6 +112,22 @@ def _parse_response(raw_text: str) -> list[dict] | None:
         return None
 
     if not isinstance(data, dict) or "buildings" not in data:
+        # Fallback: try bbox_2d list format from object detection
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            bboxes = []
+            for item in data:
+                bbox = item.get("bbox_2d")
+                label = item.get("label", "")
+                if isinstance(bbox, list) and len(bbox) == 4:
+                    cx = (bbox[0] + bbox[2]) // 2
+                    cy = (bbox[1] + bbox[3]) // 2
+                    bboxes.append({
+                        "name": label, "x": cx, "y": cy,
+                        "cost": 0, "resource": "gold",
+                    })
+            if bboxes:
+                logger.info("Parsed %d bbox_2d entries", len(bboxes))
+                return bboxes
         logger.warning("AI response missing 'buildings' key. Got: %s", str(data)[:200])
         return None
 
@@ -181,12 +197,14 @@ class DashScopeClient:
     def available(self) -> bool:
         return bool(self._api_key)
 
-    def analyze_screenshot(self, png_bytes: bytes, prompt_override: str | None = None) -> list[dict] | None:
+    def analyze_screenshot(self, png_bytes: bytes, prompt_override: str | None = None,
+                           full_res: bool = False) -> list[dict] | None:
         """Analyze a builder menu screenshot and return upgradable buildings.
 
         Args:
             png_bytes: Raw PNG image bytes (1280x720).
             prompt_override: Optional custom prompt. Uses default if None.
+            full_res: If True, send at native resolution (no downsizing).
 
         Returns:
             List of building dicts, empty list for no upgrades, None on failure.
@@ -207,9 +225,10 @@ class DashScopeClient:
         img = Image.open(io.BytesIO(png_bytes))
         logger.info("Screenshot: %dx%d", img.width, img.height)
 
-        # Resize to half resolution and convert to JPEG to reduce API latency
-        # (1280x720 RGBA → 640x360 JPEG, ~1.3MB → ~100KB)
-        img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        if not full_res:
+            # Resize to half resolution and convert to JPEG to reduce API latency
+            # (1280x720 RGBA → 640x360 JPEG, ~1.3MB → ~100KB)
+            img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
         img = img.convert("RGB")  # drop alpha channel for JPEG
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=80)
@@ -255,7 +274,7 @@ class DashScopeClient:
 
         logger.debug("AI raw response: %s", text[:500])
         result = _parse_response(text)
-        if result is not None:
+        if result is not None and not full_res:
             # Scale coordinates from resized image back to 1280x720
             for b in result:
                 b["x"] *= AI_RESIZE

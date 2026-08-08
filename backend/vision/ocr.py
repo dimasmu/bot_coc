@@ -66,12 +66,38 @@ def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
         results = reader.readtext(gray, detail=0)
         if results:
             logger.info("EasyOCR %s raw: %r", roi_name or "generic", results)
+
+        # Extract the first valid digit string from the raw results
+        primary_text = ""
         for r in results:
-            text = re.sub(r"\D", "", r)
-            if text:
-                val = int(text)
-                logger.info("EasyOCR %s → %d (raw=%r)", roi_name or "generic", val, r)
-                return val
+            t = re.sub(r"\D", "", r)
+            if t:
+                primary_text = t
+                break
+
+        # Fallback: if the raw result is suspiciously short (< 4 digits),
+        # re-read with OTSU+erode. This helps on gradient backgrounds like
+        # the gold bar at low TH where the leftmost digit has poor contrast.
+        if len(primary_text) < 4:
+            _, binary = cv2.threshold(gray, 0, 255,
+                                       cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+            eroded = cv2.erode(binary, kernel, iterations=1)
+            results2 = reader.readtext(eroded, detail=0)
+            if results2:
+                logger.info("EasyOCR %s otsu fallback: %r",
+                            roi_name or "generic", results2)
+            for r in results2:
+                t = re.sub(r"\D", "", r)
+                if t and len(t) > len(primary_text):
+                    primary_text = t
+                    break
+
+        if primary_text:
+            val = int(primary_text)
+            logger.info("EasyOCR %s → %d (text=%r)", roi_name or "generic",
+                        val, primary_text)
+            return val
 
         return None
     except Exception as e:

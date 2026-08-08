@@ -101,19 +101,38 @@ class AdbManager:
                     self._serial = serial
                     self._adapter_name = adapter.name
 
-                    # Check resolution
+                    # Only change resolution/density if different (avoid app restart)
                     res = await self._run_adb("-s", serial, "shell", "wm", "size")
                     logger.info("Resolution: %s", res.strip())
+                    target_size = f"{settings.screen_width}x{settings.screen_height}"
+                    current_size = res.strip().split()[-1] if res.strip() else ""
+                    # wm size returns e.g. "Physical size: 1280x720\nOverride size: 1280x720"
+                    # Use the override if present, otherwise physical
+                    for line in res.strip().splitlines():
+                        if "Override size:" in line:
+                            current_size = line.split(":")[-1].strip()
+                            break
+                        if "Physical size:" in line:
+                            current_size = line.split(":")[-1].strip()
 
-                    # Enforce target resolution
-                    await self._run_adb(
-                        "-s", serial, "shell", "wm", "size",
-                        f"{settings.screen_width}x{settings.screen_height}",
-                    )
-                    await self._run_adb(
-                        "-s", serial, "shell", "wm", "density",
-                        str(settings.screen_dpi),
-                    )
+                    if current_size != target_size:
+                        logger.info("Setting resolution %s → %s", current_size, target_size)
+                        await self._run_adb(
+                            "-s", serial, "shell", "wm", "size", target_size,
+                        )
+                    else:
+                        logger.info("Resolution already %s — skipping", target_size)
+
+                    target_dpi = str(settings.screen_dpi)
+                    dens = await self._run_adb("-s", serial, "shell", "wm", "density")
+                    current_dpi = dens.strip().split()[-1] if dens.strip() else ""
+                    if current_dpi != target_dpi:
+                        logger.info("Setting density %s → %s", current_dpi, target_dpi)
+                        await self._run_adb(
+                            "-s", serial, "shell", "wm", "density", target_dpi,
+                        )
+                    else:
+                        logger.info("Density already %s — skipping", target_dpi)
 
                     self.status = AdbStatus(
                         connected=True,
@@ -195,6 +214,21 @@ class AdbManager:
             return True
         except Exception as e:
             logger.error("tap failed: %s", e)
+            return False
+
+    async def swipe(self, x1: int, y1: int, x2: int, y2: int,
+                    duration_ms: int = 200) -> bool:
+        """Perform a swipe/drag via ADB input swipe."""
+        if self._serial is None:
+            return False
+        try:
+            await self._run_adb(
+                "-s", self._serial, "shell", "input", "swipe",
+                str(x1), str(y1), str(x2), str(y2), str(duration_ms),
+            )
+            return True
+        except Exception as e:
+            logger.error("swipe failed: %s", e)
             return False
 
     async def health_check(self) -> bool:

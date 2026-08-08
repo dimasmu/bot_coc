@@ -39,6 +39,7 @@ document.addEventListener("alpine:init", () => {
     elixirMax: false,
     darkElixirMax: false,
     loopMode: "",
+    currentScreen: "home",
     wsBotStatus: null,
     activeSequenceId: null,
 
@@ -215,6 +216,7 @@ document.addEventListener("alpine:init", () => {
         this.currentDarkElixir = data.current_dark_elixir ?? 0;
         this.currentGems = data.current_gems ?? 0;
         this.loopMode = data.loop_mode ?? "";
+        this.currentScreen = data.current_screen ?? "home";
         this.goldMax = data.gold_max ?? false;
         this.elixirMax = data.elixir_max ?? false;
         this.darkElixirMax = data.dark_elixir_max ?? false;

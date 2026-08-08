@@ -121,6 +121,18 @@
                 <span x-show="darkElixirMax" class="ml-1 px-1 py-0.5 rounded text-[10px] font-bold bg-purple-900 text-purple-300">MAX</span></span></div>
               <div class="flex justify-between"><span>Gems</span><span class="text-green-400" x-text="currentGems.toLocaleString('de-DE')"></span></div>
             </div>
+            <div class="mt-2 flex items-center gap-2">
+              <span class="text-[10px] uppercase tracking-wider text-slate-500">Screen:</span>
+              <span class="px-2 py-0.5 rounded text-[11px] font-bold"
+                :class="{
+                  'bg-green-900 text-green-300': currentScreen === 'home',
+                  'bg-red-900 text-red-300': currentScreen === 'shop',
+                  'bg-orange-900 text-orange-300': currentScreen === 'attack',
+                  'bg-blue-900 text-blue-300': currentScreen === 'search',
+                  'bg-slate-700 text-slate-400': !['home','shop','attack','search'].includes(currentScreen)
+                }"
+                x-text="currentScreen.toUpperCase()"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -477,7 +489,7 @@
       </div>
       <div class="bg-slate-900 rounded-lg border border-slate-700 p-3 font-mono text-xs h-96 overflow-y-auto scrollbar-thin" id="logTerminal">
         <template x-for="(line, idx) in filteredLogLines" :key="idx">
-          <div class="flex gap-2 py-0.5" :class="line.level === 'ERROR' ? 'text-red-400' : line.level === 'WARNING' ? 'text-yellow-400' : line.level === 'DEBUG' ? 'text-slate-500' : 'text-slate-300'">
+          <div class="flex gap-2 py-0.5" :class="{'text-red-400 bg-red-950/20': line.level === 'ERROR', 'text-yellow-400 bg-yellow-950/20': line.level === 'WARNING', 'text-slate-500': line.level === 'DEBUG', 'text-slate-200': line.level === 'INFO'}">
             <span class="text-slate-600 shrink-0" x-text="line.ts"></span>
             <span class="shrink-0 w-12 text-right" x-text="line.level"></span>
             <span x-text="line.msg"></span>
