@@ -106,6 +106,16 @@ was skipped.
 
 ### 5. Confirm button handling in `_do_lab_upgrade`
 
+Also update the existing lab pre-check inside `_do_lab_upgrade` so `"unknown"` behaves the same
+as `"busy"` (skip the lab instead of proceeding to tap):
+
+```python
+if status in ("busy", "unknown"):
+    logger.info("Lab not available (%s) — skipping", status)
+    self._upgrade_target = None
+    return
+```
+
 Add a small helper:
 
 ```python
