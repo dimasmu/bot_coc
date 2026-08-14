@@ -668,11 +668,12 @@ class SequenceRunner:
 
         builders = self._read_builder_count(screen)
         if builders < 1:
-            # No free builders — try laboratory research.
-            # _do_lab_upgrade opens the research panel and checks for
-            # "Suggested upgrades:"; skips gracefully if none found.
-            logger.info("No free builders — trying lab upgrade")
-            self._upgrade_target = {"type": "lab"}
+            lab_status = self._read_lab_status(screen)
+            logger.info("No free builders — lab status: %s", lab_status)
+            if lab_status == "free":
+                self._upgrade_target = {"type": "lab"}
+            else:
+                self._upgrade_target = None
             return
 
         resources = self._read_resources(screen)
@@ -951,12 +952,12 @@ class SequenceRunner:
         from backend.vision.ocr import find_text
 
         if builders < 1:
-            # No free builders — try laboratory research.
-            # _do_lab_upgrade checks the research panel for "Suggested"
-            # and skips gracefully if the lab is busy or empty.
-            logger.info("No free builders — switching to lab upgrade")
-            self._upgrade_target = {"type": "lab"}
-            return "upgrade"
+            lab_status = self._read_lab_status(screen)
+            logger.info("No free builders — lab status: %s", lab_status)
+            if lab_status == "free":
+                self._upgrade_target = {"type": "lab"}
+                return "upgrade"
+            return "farming"
 
         # Open builder menu for building upgrade check
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
@@ -1027,6 +1028,10 @@ class SequenceRunner:
         from backend.db.models import RoiTemplate
 
         self.state = "UPGRADING"
+
+        if not self._upgrade_target:
+            logger.info("No upgrade target — skipping")
+            return
 
         # Laboratory upgrade — separate flow, no builders needed
         if self._upgrade_target and self._upgrade_target.get("type") == "lab":
