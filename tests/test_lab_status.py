@@ -85,3 +85,17 @@ def test_read_lab_status_busy_when_used_nonzero(runner, monkeypatch):
     assert runner._read_lab_status(_make_blank_screen()) == "busy"
     assert calls[0][1].get("roi_name") == "lab_status"
     assert calls[0][0][1:5] == (400, 20, 80, 30)
+
+
+@pytest.mark.asyncio
+async def test_tap_close_universal_taps_roi_center(runner, monkeypatch):
+    taps = []
+
+    async def fake_tap(adb, x, y, sigma=0):
+        taps.append((x, y))
+
+    monkeypatch.setattr(seq_mod, "get_session", lambda: _FakeSession(_FakeRoi()))
+    monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
+
+    await runner._tap_close_universal(None)
+    assert taps == [(440, 35)]  # 400 + 80//2, 20 + 30//2

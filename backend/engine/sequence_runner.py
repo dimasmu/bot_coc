@@ -906,6 +906,18 @@ class SequenceRunner:
             return "free"
         return "busy"
 
+    async def _tap_close_universal(self, adb):
+        """Tap the global close button (btn_close_universal ROI)."""
+        with get_session() as session:
+            close_roi = session.query(RoiTemplate).filter_by(
+                roi_name="btn_close_universal").first()
+        if close_roi:
+            cx = close_roi.x_pos + close_roi.width // 2
+            cy = close_roi.y_pos + close_roi.height // 2
+            await human_tap(adb, cx, cy, sigma=5)
+        else:
+            logger.warning("btn_close_universal ROI not calibrated")
+
     async def _evaluate_mode(self, adb) -> str:
         """Determine whether to farm or upgrade. Returns 'farming' or 'upgrade'.
 
@@ -1199,8 +1211,8 @@ class SequenceRunner:
         screen = await adb.screencap()
         if screen:
             status = self._read_lab_status(screen)
-            if status == "busy":
-                logger.info("Lab is actively researching — skipping")
+            if status in ("busy", "unknown"):
+                logger.info("Lab not available (%s) — skipping", status)
                 self._upgrade_target = None
                 return
             logger.info("Lab status pre-check: %s", status)
@@ -1239,15 +1251,12 @@ class SequenceRunner:
         await human_delay(1.0, 2.0)
 
         # ── Phase 3: Confirm research ──
-        # Same green button detection as building upgrades:
-        # template matching → HSV green → red cost check
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
 
         import numpy as _np, cv2 as _cv2, time as _time
-        # Save debug screenshot for lab confirm panel
         _ts = _time.strftime("%Y%m%d_%H%M%S")
         with open(f"storage/debug/lab_confirm_{_ts}.png", "wb") as _f:
             _f.write(screen)
@@ -1262,26 +1271,23 @@ class SequenceRunner:
             await human_tap(adb, target_pos[0], target_pos[1], sigma=5)
             await human_delay(0.5, 1.0)
             logger.info("Lab research started!")
+            await self._tap_close_universal(adb)
+            await human_delay(0.5, 1.0)
         elif status in ("INSUFFICIENT_RESOURCES", "TOWN_HALL_REQUIRED"):
             reason = "insufficient resources" if status == "INSUFFICIENT_RESOURCES" \
                      else "Town Hall required"
-            logger.info("Lab research: %s — skipping", reason)
+            logger.warning("%s! Menutup modal 2x & pindah farming.", reason)
+            await self._tap_close_universal(adb)
+            await human_delay(0.5, 1.0)
+            await self._tap_close_universal(adb)
+            await human_delay(0.5, 1.0)
+            self._loop_mode = "farming"
         else:
-            logger.info("No confirm button found — skipping")
-
-        # Phase 4: Dismiss remaining popups after confirm
-        with get_session() as session:
-            close_roi = session.query(RoiTemplate).filter_by(
-                roi_name="btn_close_universal",
-            ).first()
-        if close_roi:
-            cx = close_roi.x_pos + close_roi.width // 2
-            cy = close_roi.y_pos + close_roi.height // 2
-            await human_tap(adb, cx, cy, sigma=3)
+            logger.warning("Tombol CONFIRM tidak ditemukan — menutup modal.")
+            await self._tap_close_universal(adb)
             await human_delay(0.5, 1.0)
 
         self._upgrade_target = None
-        logger.info("Laboratory upgrade completed")
 
     async def _do_upgrade_execute_template(self, adb):
         """Fallback: execute upgrade using template matching (original logic)."""
