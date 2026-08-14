@@ -58,12 +58,30 @@ def test_read_lab_status_unknown_when_ratio_none(runner, monkeypatch):
 
 
 def test_read_lab_status_free_when_used_zero(runner, monkeypatch):
+    calls = []
+
+    def fake_read_ratio(*args, **kwargs):
+        calls.append((args, kwargs))
+        return (0, 1)
+
     monkeypatch.setattr(seq_mod, "get_session", lambda: _FakeSession(_FakeRoi()))
-    monkeypatch.setattr(seq_mod, "read_ratio", lambda *a, **k: (0, 1))
+    monkeypatch.setattr(seq_mod, "read_ratio", fake_read_ratio)
+
     assert runner._read_lab_status(_make_blank_screen()) == "free"
+    assert calls[0][1].get("roi_name") == "lab_status"
+    assert calls[0][0][1:5] == (400, 20, 80, 30)
 
 
 def test_read_lab_status_busy_when_used_nonzero(runner, monkeypatch):
+    calls = []
+
+    def fake_read_ratio(*args, **kwargs):
+        calls.append((args, kwargs))
+        return (1, 1)
+
     monkeypatch.setattr(seq_mod, "get_session", lambda: _FakeSession(_FakeRoi()))
-    monkeypatch.setattr(seq_mod, "read_ratio", lambda *a, **k: (1, 1))
+    monkeypatch.setattr(seq_mod, "read_ratio", fake_read_ratio)
+
     assert runner._read_lab_status(_make_blank_screen()) == "busy"
+    assert calls[0][1].get("roi_name") == "lab_status"
+    assert calls[0][0][1:5] == (400, 20, 80, 30)

@@ -886,34 +886,22 @@ class SequenceRunner:
             'busy'  — used > 0, research in progress
             'unknown' — OCR failed or ROI not calibrated
         """
+        if not screen:
+            return "unknown"
+
         with get_session() as session:
             lab_roi = session.query(RoiTemplate).filter_by(
                 roi_name="lab_status").first()
         if not lab_roi:
             return "unknown"
 
-        # Debug crops for calibration verification
-        nparr = np.frombuffer(screen, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is not None:
-            h, w = img.shape[:2]
-            x1 = max(0, lab_roi.x_pos)
-            y1 = max(0, lab_roi.y_pos)
-            x2 = min(w, lab_roi.x_pos + lab_roi.width)
-            y2 = min(h, lab_roi.y_pos + lab_roi.height)
-            if x2 > x1 and y2 > y1:
-                roi = img[y1:y2, x1:x2]
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                cv2.imwrite("storage/debug/lab_status_crop.png", roi)
-                cv2.imwrite("storage/debug/lab_status_gray.png", gray)
-
         pair = read_ratio(screen, lab_roi.x_pos, lab_roi.y_pos,
                           lab_roi.width, lab_roi.height, roi_name="lab_status")
         if pair is None:
             return "unknown"
 
-        used, total = pair
-        logger.info("Lab status OCR: %d/%d", used, total)
+        used, _ = pair
+        logger.info("Lab status OCR: %d/%d", used, pair[1])
         if used == 0:
             return "free"
         return "busy"
