@@ -918,6 +918,14 @@ class SequenceRunner:
         else:
             logger.warning("btn_close_universal ROI not calibrated")
 
+    def _save_lab_confirm_debug(self, screen):
+        """Write the lab confirm panel screenshot to storage/debug."""
+        import time as _time
+        _ts = _time.strftime("%Y%m%d_%H%M%S")
+        with open(f"storage/debug/lab_confirm_{_ts}.png", "wb") as _f:
+            _f.write(screen)
+        logger.info("Debug: lab_confirm_%s.png saved", _ts)
+
     async def _evaluate_mode(self, adb) -> str:
         """Determine whether to farm or upgrade. Returns 'farming' or 'upgrade'.
 
@@ -1256,11 +1264,8 @@ class SequenceRunner:
             self._upgrade_target = None
             return
 
-        import numpy as _np, cv2 as _cv2, time as _time
-        _ts = _time.strftime("%Y%m%d_%H%M%S")
-        with open(f"storage/debug/lab_confirm_{_ts}.png", "wb") as _f:
-            _f.write(screen)
-        logger.info("Debug: lab_confirm_%s.png saved", _ts)
+        import numpy as _np, cv2 as _cv2
+        self._save_lab_confirm_debug(screen)
 
         _cimg = _cv2.imdecode(_np.frombuffer(screen, _np.uint8), _cv2.IMREAD_COLOR)
         status, target_pos = analyze_confirm_button(_cimg)

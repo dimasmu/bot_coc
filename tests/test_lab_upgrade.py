@@ -44,6 +44,7 @@ async def test_lab_upgrade_insufficient_resources_closes_twice_and_farming(monke
     runner = SequenceRunner()
     runner._upgrade_target = {"type": "lab"}
     runner._loop_mode = "upgrade"
+    monkeypatch.setattr(runner, "_save_lab_confirm_debug", lambda screen: None)
 
     close_calls = []
 
