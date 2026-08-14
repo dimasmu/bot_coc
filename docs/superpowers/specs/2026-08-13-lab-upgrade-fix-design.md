@@ -68,8 +68,8 @@ Replace the current inline crop + single-pass OCR:
 - Call `read_ratio(screen, x, y, w, h, roi_name="lab_status")`.
 - `(used, total)`: `used == 0` → `"free"`, otherwise `"busy"`.
 - `None` → `"unknown"`.
-- Keep debug crops for verification: `storage/debug/lab_status_crop.png` and
-  `storage/debug/lab_status_gray.png`.
+- Log the OCR result (`Lab status OCR: X/Y`) for calibration verification; no debug
+  image files are written by this method.
 
 ### 4. Routing gates
 
