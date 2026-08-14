@@ -1,0 +1,46 @@
+"""Tests for read_ratio OCR helper."""
+
+import cv2
+import numpy as np
+
+import backend.vision.ocr as ocr
+
+
+def _make_blank_screen() -> bytes:
+    img = np.zeros((720, 1280, 3), dtype=np.uint8)
+    _, buf = cv2.imencode(".png", img)
+    return buf.tobytes()
+
+
+def test_read_ratio_invalid_bounds_returns_none():
+    screen = _make_blank_screen()
+    assert ocr.read_ratio(screen, -100, -100, 50, 50) is None
+
+
+def test_read_ratio_unreadable_returns_none(monkeypatch):
+    screen = _make_blank_screen()
+
+    class FakeReader:
+        def readtext(self, *args, **kwargs):
+            return []
+
+    monkeypatch.setattr(ocr, "_get_reader", lambda: FakeReader())
+    monkeypatch.setattr(ocr, "read_number", lambda s, x, y, w, h: None)
+
+    assert ocr.read_ratio(screen, 400, 20, 80, 30) is None
+
+
+def test_read_ratio_split_fallback_returns_pair(monkeypatch):
+    screen = _make_blank_screen()
+
+    class FakeReader:
+        def readtext(self, *args, **kwargs):
+            return []
+
+    def fake_read_number(s, x, y, w, h):
+        return 0 if x < 440 else 1
+
+    monkeypatch.setattr(ocr, "_get_reader", lambda: FakeReader())
+    monkeypatch.setattr(ocr, "read_number", fake_read_number)
+
+    assert ocr.read_ratio(screen, 400, 20, 80, 30) == (0, 1)

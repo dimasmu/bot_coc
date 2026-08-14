@@ -105,6 +105,73 @@ def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
         return None
 
 
+def read_ratio(screenshot: bytes, x: int, y: int, width: int, height: int,
+               roi_name: str = "") -> tuple[int, int] | None:
+    """Read a 'used/total' ratio (e.g. '0/1', '2/5') from a region.
+
+    Uses the same grayscale + 2x + OTSU + erode fallback as read_number,
+    then falls back to reading the left/right halves separately.
+    Returns (used, total) or None if unreadable.
+    """
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+
+        pad_left, pad_right, pad_top, pad_bottom = _get_padding(roi_name)
+        x1 = max(0, x - pad_left)
+        y1 = max(0, y - pad_top)
+        x2 = min(w, x + width + pad_right)
+        y2 = min(h, y + height + pad_bottom)
+
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        roi = img[y1:y2, x1:x2]
+        roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+        reader = _get_reader()
+
+        def _extract(text_results) -> tuple[int, int] | None:
+            text = " ".join(text_results)
+            m = re.search(r'(\d+)\s*/\s*(\d+)', text)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+            return None
+
+        # Pass 1: grayscale full-text OCR
+        results = reader.readtext(gray, detail=0, paragraph=True)
+        pair = _extract(results)
+        if pair:
+            logger.info("read_ratio %s pass1: %r -> %s", roi_name or "generic", results, pair)
+            return pair
+
+        # Pass 2: OTSU + erode fallback
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        eroded = cv2.erode(binary, kernel, iterations=1)
+        results2 = reader.readtext(eroded, detail=0, paragraph=True)
+        pair = _extract(results2)
+        if pair:
+            logger.info("read_ratio %s pass2 (otsu): %r -> %s", roi_name or "generic", results2, pair)
+            return pair
+
+        # Pass 3: split ROI into halves and read each number separately
+        left = read_number(screenshot, x, y, width // 2, height)
+        right = read_number(screenshot, x + width // 2, y, width - width // 2, height)
+        if left is not None and right is not None:
+            logger.info("read_ratio %s split: %d/%d", roi_name or "generic", left, right)
+            return (left, right)
+
+        return None
+    except Exception as e:
+        logger.error("read_ratio failed: %s", e)
+        return None
+
+
 def read_raw_text(screenshot: bytes, x: int, y: int, width: int, height: int) -> str:
     """Read raw text from a region using EasyOCR (no digit filter).
 
