@@ -11,7 +11,8 @@ import numpy as np
 
 from backend.adb.manager import adb_manager
 from backend.humanize import human_tap, human_delay
-from backend.vision.ocr import read_number
+from backend.vision.ocr import read_number, read_ratio
+from backend.vision import analyze_confirm_button
 from sqlmodel import select
 from backend.db.database import get_session
 from backend.db.models import RoiTemplate, Config, AttackLog
@@ -50,6 +51,7 @@ class SequenceRunner:
         self._gold_stable = 0
         self._elixir_stable = 0
         self._de_stable = 0
+        self._confirm_debug_counter = 0
 
     @property
     def is_running(self):
@@ -135,6 +137,17 @@ class SequenceRunner:
             while i < len(steps) and self._running:
                 step = steps[i]
                 try:
+                    # Pre-step: verify we're on the expected screen
+                    if not await self._verify_step_screen(adb, step.step_type):
+                        logger.warning("Step %s — wrong screen, recovering home", step.step_type)
+                        await self._do_return_home(adb)
+                        if not await self._verify_step_screen(adb, step.step_type):
+                            logger.error("Step %s — still wrong screen after recovery, skipping",
+                                         step.step_type)
+                            _last_failed_step_idx = -1
+                            i += 1
+                            continue
+
                     await self._execute_step(step, adb)
                     _last_failed_step_idx = -1  # success resets failure tracker
                     i += 1
@@ -185,6 +198,8 @@ class SequenceRunner:
                             if builders > 0:
                                 current_mode = "upgrade"
                                 logger.info("Builder free — switching to upgrade loop")
+                            elif builders == 0:
+                                current_mode = await self._evaluate_mode(adb)
                         else:
                             logger.warning("Screencap failed during builder check")
                     self._loop_mode = current_mode
@@ -225,6 +240,73 @@ class SequenceRunner:
             await self._do_upgrade_check(adb)
         elif stype == "upgrade_execute":
             await self._do_upgrade_execute(adb)
+
+    # ── Pre-Step Screen Verification ─────────────────────────────────
+
+    async def _is_home_screen(self, adb) -> bool:
+        """Check if the home village screen is visible.
+
+        Uses OCR for the 'Attack!' button text — more robust than template
+        matching which can fail at different button shades / screen sizes.
+        """
+        from backend.vision.ocr import find_text
+
+        cap = await adb.screencap()
+        if not cap:
+            return True  # can't verify — allow through
+
+        # "Attack!" button is only visible on the home village screen
+        # Position check: the real button is bottom-left (x<200, y>500).
+        # OCR can false-match "Attack" in other UI text at x>1000.
+        result = find_text(cap, "Attack")
+        if result and result[0] < 200 and result[1] > 500:
+            return True
+        return False
+
+    async def _is_attack_screen(self, adb) -> bool:
+        """Check if attack/search screen is visible (troop cards or shop icon)."""
+        from backend.vision.matching import match_template
+        from pathlib import Path
+
+        cap = await adb.screencap()
+        if not cap:
+            return True  # can't verify — allow through
+
+        # Try detecting troop cards (attack deploy screen)
+        cards = await self._detect_cards(adb)
+        if cards:
+            return True
+
+        # Fallback: Shop icon (attack search screen)
+        shop_pos = match_template(
+            cap, str(Path(self._TPL_DIR) / "icon_shop_tab.png"), threshold=0.6,
+        )
+        if shop_pos:
+            return True
+
+        return False
+
+    async def _verify_step_screen(self, adb, step_type: str) -> bool:
+        """Verify the expected screen is visible before executing a step.
+        Returns True if screen matches, False if recovery is needed."""
+        if step_type in ("return_home",):
+            return True  # return_home IS the recovery — always allow
+
+        if step_type in ("upgrade_check", "upgrade_execute", "tap", "wait"):
+            if not await self._is_home_screen(adb):
+                logger.warning("Step '%s': NOT on home screen", step_type)
+                return False
+            return True
+
+        if step_type in ("search", "attack"):
+            if not await self._is_attack_screen(adb):
+                logger.warning("Step '%s': NOT on attack screen", step_type)
+                return False
+            return True
+
+        return True  # unknown step types pass through
+
+    # ── End Pre-Step Screen Verification ─────────────────────────────
 
     async def _do_search(self, step, adb):
         from backend.db.database import get_session
@@ -302,10 +384,12 @@ class SequenceRunner:
 
         nparr = np.frombuffer(screen, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+        img_color = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         h, w = img.shape
 
         bar_top = max(0, h - 180)
         bar = img[bar_top:h, 0:w]
+        bar_color = img_color[bar_top:h, 0:w, :]
         card_w, card_h = 60, 85
         spacing = (self._CARD_X_POSITIONS[-1] - self._CARD_X_POSITIONS[0]) // (len(self._CARD_X_POSITIONS) - 1)
 
@@ -324,6 +408,18 @@ class SequenceRunner:
             region = bar[y1:, x1:x2]
             if np.std(region) < 20:
                 return False
+            # Reject empty transparent slots showing grass behind them.
+            # Check the card center (ignoring edges) for grass-green dominance.
+            center_roi = bar_color[y1 + card_h // 4 : y1 + card_h * 3 // 4,
+                                   x1 - scan_x + card_w // 4 : x2 - scan_x + card_w * 3 // 4]
+            if center_roi.size > 0:
+                hsv = cv2.cvtColor(center_roi, cv2.COLOR_BGR2HSV)
+                grass_mask = cv2.inRange(
+                    hsv, np.array([35, 80, 80]), np.array([85, 255, 255]),
+                )
+                grass_pct = np.count_nonzero(grass_mask) / grass_mask.size
+                if grass_pct > 0.75:  # center is mostly grass → empty slot
+                    return False
             if scan_x in detected:
                 return False
             detected.add(scan_x)
@@ -531,55 +627,35 @@ class SequenceRunner:
             logger.error("Failed to close Shop screen after fallback")
             raise ScreenVerificationError("Shop screen persisted after close attempt")
 
-    async def _verify_home_screen(self, adb, max_taps: int = 10):
-        """After return-home, dismiss any event/popup covering the village.
-
-        Uses the Attack button as a home-screen landmark. If not visible,
-        taps randomly to dismiss the popup. Raises ScreenVerificationError
-        if the home screen cannot be reached.
-        """
-        from backend.vision.matching import match_template
-        from pathlib import Path
-
-        tpl_attack = Path(self._TPL_DIR) / "btn_attack.png"
-        if not tpl_attack.exists():
-            return  # template not yet captured — skip verification
-
-        for attempt in range(max_taps + 1):
-            cap = await adb.screencap()
-            if not cap:
-                continue
-
-            result = match_template(cap, str(tpl_attack), threshold=0.6)
-            if result is not None:
-                self.current_screen = "home"
-                if attempt > 0:
-                    logger.info("Home screen confirmed after %d dismissal tap(s)", attempt)
-                return  # home screen visible
-
-            if attempt < max_taps:
-                # Random tap to dismiss popup — most CoC popups close on any tap
-                tx = random.randint(400, 900)
-                ty = random.randint(300, 600)
-                logger.warning("Home screen blocked — dismissing (tap %d/%d at %d,%d)",
-                               attempt + 1, max_taps, tx, ty)
-                await human_tap(adb, tx, ty, sigma=30)
-                await human_delay(1.0, 2.0)
-
-        # Last resort: try tapping return-home again
-        logger.warning("Popup persisted after %d taps — retrying return-home", max_taps)
-        await human_tap(adb, 640, 650, sigma=15)
-        await human_delay(2.0, 3.0)
-        cap = await adb.screencap()
-        if cap and match_template(cap, str(tpl_attack), threshold=0.6):
-            self.current_screen = "home"
-            logger.info("Home screen confirmed after return-home retry")
-            return
-
-        logger.error("Failed to reach home screen after %d dismissal attempts", max_taps)
-        # Don't raise — better to continue with wrong screen than hang
-
     # ── End Screen Verification ────────────────────────────────────
+
+    # ── Popup Blocker Resolution ────────────────────────────────────
+
+    async def _dismiss_blockers(self, adb) -> bool:
+        """Check for and dismiss any popup/event blocking the screen.
+
+        Uses HSV color detection to find CONTINUE (green), Return Home
+        (orange), or Close X (red) buttons and taps them precisely.
+
+        Returns True if a blocker was found and dismissed.
+        """
+        from backend.engine.middleware import resolve_blockers
+        import numpy as _np, cv2 as _cv2
+
+        cap = await adb.screencap()
+        if not cap:
+            return False
+
+        _img = _cv2.imdecode(_np.frombuffer(cap, _np.uint8), _cv2.IMREAD_COLOR)
+        blocked, pos = resolve_blockers(_img)
+        if blocked and pos:
+            logger.info("Blocker dismissed via middleware at (%d,%d)", pos[0], pos[1])
+            await human_tap(adb, pos[0], pos[1], sigma=5)
+            await human_delay(1.0, 1.5)
+            return True
+        return False
+
+    # ── End Popup Blocker Resolution ────────────────────────────────
 
     async def _do_upgrade_check(self, adb):
         """Read builder count and resources, store for _do_upgrade_execute."""
@@ -592,14 +668,17 @@ class SequenceRunner:
 
         builders = self._read_builder_count(screen)
         if builders < 1:
-            logger.info("No free builders — skipping upgrade")
-            self._upgrade_target = None
+            # No free builders — try laboratory research.
+            # _do_lab_upgrade opens the research panel and checks for
+            # "Suggested upgrades:"; skips gracefully if none found.
+            logger.info("No free builders — trying lab upgrade")
+            self._upgrade_target = {"type": "lab"}
             return
 
         resources = self._read_resources(screen)
         logger.info("Builders=%d Resources: G=%d E=%d DE=%d",
                      builders, resources["gold"], resources["elixir"], resources["dark_elixir"])
-        self._upgrade_target = {"resources": resources}
+        self._upgrade_target = {"type": "building", "resources": resources}
 
     def _match_in_region(self, region_gray, tpl_path, offset_x, offset_y, threshold):
         """Match a template within a pre-cropped region. Returns screen coords or None."""
@@ -796,11 +875,55 @@ class SequenceRunner:
             return 1
         return bc
 
+    def _read_lab_status(self, screen) -> str:
+        """Read lab research status from the calibrated lab_status ROI.
+
+        OCRs the '0/1' digits only (not the icon). Uses read_ratio which
+        mirrors read_number's grayscale + OTSU + erode fallback.
+
+        Returns:
+            'free'  — used == 0, lab available for research
+            'busy'  — used > 0, research in progress
+            'unknown' — OCR failed or ROI not calibrated
+        """
+        with get_session() as session:
+            lab_roi = session.query(RoiTemplate).filter_by(
+                roi_name="lab_status").first()
+        if not lab_roi:
+            return "unknown"
+
+        # Debug crops for calibration verification
+        nparr = np.frombuffer(screen, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is not None:
+            h, w = img.shape[:2]
+            x1 = max(0, lab_roi.x_pos)
+            y1 = max(0, lab_roi.y_pos)
+            x2 = min(w, lab_roi.x_pos + lab_roi.width)
+            y2 = min(h, lab_roi.y_pos + lab_roi.height)
+            if x2 > x1 and y2 > y1:
+                roi = img[y1:y2, x1:x2]
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                cv2.imwrite("storage/debug/lab_status_crop.png", roi)
+                cv2.imwrite("storage/debug/lab_status_gray.png", gray)
+
+        pair = read_ratio(screen, lab_roi.x_pos, lab_roi.y_pos,
+                          lab_roi.width, lab_roi.height, roi_name="lab_status")
+        if pair is None:
+            return "unknown"
+
+        used, total = pair
+        logger.info("Lab status OCR: %d/%d", used, total)
+        if used == 0:
+            return "free"
+        return "busy"
+
     async def _evaluate_mode(self, adb) -> str:
         """Determine whether to farm or upgrade. Returns 'farming' or 'upgrade'.
 
         Opens the builder menu and checks for a "Suggested Upgrade" header
         via template matching. No AI call — just image matching + OCR fallback.
+        When builders are busy, also checks if a lab upgrade is available.
         """
         await human_delay(0.5, 1.0)
 
@@ -809,9 +932,6 @@ class SequenceRunner:
             return "farming"
 
         builders = self._read_builder_count(screen)
-        if builders < 1:
-            logger.info("No free builders — farming mode")
-            return "farming"
 
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
@@ -820,7 +940,17 @@ class SequenceRunner:
         menu_cx = menu_roi.x_pos + menu_roi.width // 2
         menu_cy = menu_roi.y_pos + menu_roi.height // 2
 
-        # Open builder menu
+        from backend.vision.ocr import find_text
+
+        if builders < 1:
+            # No free builders — try laboratory research.
+            # _do_lab_upgrade checks the research panel for "Suggested"
+            # and skips gracefully if the lab is busy or empty.
+            logger.info("No free builders — switching to lab upgrade")
+            self._upgrade_target = {"type": "lab"}
+            return "upgrade"
+
+        # Open builder menu for building upgrade check
         await human_tap(adb, menu_cx, menu_cy, sigma=3)
         await human_delay(1.5, 2.5)
 
@@ -830,8 +960,6 @@ class SequenceRunner:
             return "farming"
 
         # Check for suggested upgrade via OCR text detection
-        from backend.vision.ocr import find_text
-
         if find_text(screen2, "Suggested"):
             logger.info("Suggested upgrade found — switching to upgrade")
             await human_tap(adb, menu_cx, menu_cy, sigma=3)  # close menu
@@ -892,6 +1020,10 @@ class SequenceRunner:
 
         self.state = "UPGRADING"
 
+        # Laboratory upgrade — separate flow, no builders needed
+        if self._upgrade_target and self._upgrade_target.get("type") == "lab":
+            return await self._do_lab_upgrade(adb)
+
         with get_session() as session:
             menu_roi = session.query(RoiTemplate).filter_by(roi_name="builder_menu").first()
         if not menu_roi:
@@ -940,7 +1072,11 @@ class SequenceRunner:
                     self._upgrade_target = None
                     return
                 else:
-                    # Try to close Shop and return home
+                    # Deploy failed — building may be in placement mode or cancelled.
+                    # Tap empty area to dismiss any lingering dialogs/popups.
+                    await human_tap(adb, 640, 360, sigma=50)
+                    await human_delay(1.5, 2.5)
+                    # Try to close Shop if still visible
                     close_pos = match_template(
                         screen2, str(Path(self._TPL_DIR) / "btn_shop_close.png"),
                         threshold=0.5,
@@ -991,55 +1127,173 @@ class SequenceRunner:
             return
         await human_delay(1.0, 2.0)
 
-        # Phase 3: Find "Confirm" text via OCR (reliable across event skins)
+        # Phase 3: Find Confirm button via template matching
+        # Only scans bottom-right of the upgrade modal (x:600-800, y:580-700)
+        # to avoid false positives on HP bars and grass terrain.
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        from backend.vision.ocr import find_text
-        confirm_pos = find_text(screen, "Confirm")
-        if confirm_pos:
-            # Tap slightly below the text center (button extends downward)
-            await human_tap(adb, confirm_pos[0], confirm_pos[1] + 20, sigma=5)
-            await human_delay(0.5, 1.0)
-        else:
-            # Fallback: template matching, then calibrated ROI
-            confirm_pos = None
-            for tpl_path in self._TPL_CONFIRM:
-                confirm_pos = match_template(screen, tpl_path, threshold=0.5)
-                if confirm_pos:
-                    break
-            if confirm_pos:
-                await human_tap(adb, confirm_pos[0], confirm_pos[1], sigma=3)
-                await human_delay(0.5, 1.0)
-            else:
-                # Last fallback: calibrated ROI
-                with get_session() as session:
-                    confirm_roi = session.query(RoiTemplate).filter_by(
-                        roi_name="btn_confirm_upgrade").first()
-                if confirm_roi:
-                    cx = confirm_roi.x_pos + confirm_roi.width // 2
-                    cy = confirm_roi.y_pos + confirm_roi.height // 2
-                    await human_tap(adb, cx, cy, sigma=5)
-                    await human_delay(0.5, 1.0)
-                else:
-                    logger.warning("Confirm button not found (OCR + template + ROI)")
-                    self._upgrade_target = None
-                    return
+        import numpy as _np, cv2 as _cv2, os as _os
+        _nparr = _np.frombuffer(screen, _np.uint8)
+        _cimg = _cv2.imdecode(_nparr, _cv2.IMREAD_COLOR)
 
-        # Phase 3b: Dismiss hero hall confirmation popup if present
-        # Hero upgrades have a second confirmation layer that needs dismissal
-        await human_delay(0.5, 1.0)
-        with get_session() as session:
-            close_roi = session.query(RoiTemplate).filter_by(roi_name="btn_close_universal").first()
-        if close_roi:
-            cx = close_roi.x_pos + close_roi.width // 2
-            cy = close_roi.y_pos + close_roi.height // 2
-            await human_tap(adb, cx, cy, sigma=5)
-            logger.info("Tapped btn_close_universal at (%d,%d)", cx, cy)
+        # DEBUG: Save screenshot before confirm detection
+        self._confirm_debug_counter += 1
+        _os.makedirs("storage/debug", exist_ok=True)
+        _cv2.imwrite(f"storage/debug/confirm_debug_{self._confirm_debug_counter}.png", _cimg)
+        logger.info("Debug: confirm_debug_%d.png saved", self._confirm_debug_counter)
+
+        # Analyze confirm button status
+        status, target_pos = analyze_confirm_button(_cimg)
+
+        if status == "READY":
+            click_x, click_y = target_pos
+            logger.info(
+                f"Resource cukup! Menekan tombol CONFIRM di ({click_x}, {click_y})"
+            )
+            await human_tap(adb, click_x, click_y, sigma=5)
+            await human_delay(1.5, 2.5)
+            logger.info("Upgrade berhasil dimulai!")
+
+        elif status in ("INSUFFICIENT_RESOURCES", "TOWN_HALL_REQUIRED"):
+            reason = "Resource kurang" if status == "INSUFFICIENT_RESOURCES" else "Town Hall required"
+            logger.warning("%s! Membatalkan upgrade & menutup modal.", reason)
+            # Tutup modal tanpa menekan tombol CONFIRM
+            with get_session() as session:
+                close_roi = session.query(RoiTemplate).filter_by(
+                    roi_name="btn_close_universal").first()
+            if close_roi:
+                _cx = close_roi.x_pos + close_roi.width // 2
+                _cy = close_roi.y_pos + close_roi.height // 2
+                await human_tap(adb, _cx, _cy, sigma=5)
+                await human_delay(1.0, 1.5)
+            # Pindah ke Farming Mode untuk mencari resource
+            self._loop_mode = "farming"
+            self._upgrade_target = None
+            return
+
+        else:  # NOT_FOUND
+            logger.warning(
+                "Tombol CONFIRM tidak ditemukan di layar — menutup modal."
+            )
+            with get_session() as session:
+                close_roi = session.query(RoiTemplate).filter_by(
+                    roi_name="btn_close_universal").first()
+            if close_roi:
+                _cx = close_roi.x_pos + close_roi.width // 2
+                _cy = close_roi.y_pos + close_roi.height // 2
+                await human_tap(adb, _cx, _cy, sigma=5)
+                await human_delay(1.0, 1.5)
+            self._upgrade_target = None
+            return
 
         logger.info("Upgrade confirmed — resources spent")
         self._upgrade_target = None
+
+    async def _do_lab_upgrade(self, adb):
+        """Execute laboratory research when builders are busy.
+
+        Flow:
+          1. Tap calibrated lab_upgrade ROI → opens research panel
+          2. OCR "Suggested upgrades:" → tap first row
+          3. analyze_confirm_button (same as building upgrades) → tap
+          4. Dismiss popups via btn_close_universal
+        No hammer/cog intermediate button needed.
+        """
+        from backend.db.database import get_session
+        from backend.db.models import RoiTemplate
+        from backend.vision.ocr import find_text
+
+        logger.info("=== Laboratory Upgrade ===")
+
+        # ── Pre-check: verify lab is still free before tapping ──
+        screen = await adb.screencap()
+        if screen:
+            status = self._read_lab_status(screen)
+            if status == "busy":
+                logger.info("Lab is actively researching — skipping")
+                self._upgrade_target = None
+                return
+            logger.info("Lab status pre-check: %s", status)
+
+        # ── Phase 1: Tap lab icon → open research panel ──
+        with get_session() as session:
+            lab_roi = session.query(RoiTemplate).filter_by(
+                roi_name="lab_upgrade").first()
+        if not lab_roi:
+            logger.warning("lab_upgrade ROI not calibrated")
+            self._upgrade_target = None
+            return
+
+        lab_cx = lab_roi.x_pos + lab_roi.width // 2
+        lab_cy = lab_roi.y_pos + lab_roi.height // 2
+        logger.info("Phase 1: tapping lab_upgrade ROI at (%d,%d)", lab_cx, lab_cy)
+        await human_tap(adb, lab_cx, lab_cy, sigma=3)
+        await human_delay(1.5, 2.5)
+
+        # ── Phase 2: Tap first suggested upgrade row ──
+        screen = await adb.screencap()
+        if not screen:
+            self._upgrade_target = None
+            return
+
+        suggested_pos = find_text(screen, "Suggested")
+        if not suggested_pos:
+            logger.info("No 'Suggested upgrades:' in lab panel — lab busy or none available")
+            self._upgrade_target = None
+            return
+
+        tap_x = suggested_pos[0]
+        tap_y = suggested_pos[1] + 150
+        logger.info("Phase 2: tapping first research row at (%d,%d)", tap_x, tap_y)
+        await human_tap(adb, tap_x, tap_y, sigma=5)
+        await human_delay(1.0, 2.0)
+
+        # ── Phase 3: Confirm research ──
+        # Same green button detection as building upgrades:
+        # template matching → HSV green → red cost check
+        screen = await adb.screencap()
+        if not screen:
+            self._upgrade_target = None
+            return
+
+        import numpy as _np, cv2 as _cv2, time as _time
+        # Save debug screenshot for lab confirm panel
+        _ts = _time.strftime("%Y%m%d_%H%M%S")
+        with open(f"storage/debug/lab_confirm_{_ts}.png", "wb") as _f:
+            _f.write(screen)
+        logger.info("Debug: lab_confirm_%s.png saved", _ts)
+
+        _cimg = _cv2.imdecode(_np.frombuffer(screen, _np.uint8), _cv2.IMREAD_COLOR)
+        status, target_pos = analyze_confirm_button(_cimg)
+
+        if status == "READY":
+            logger.info("Phase 3: tapping confirm at (%d,%d)",
+                         target_pos[0], target_pos[1])
+            await human_tap(adb, target_pos[0], target_pos[1], sigma=5)
+            await human_delay(0.5, 1.0)
+            logger.info("Lab research started!")
+        elif status in ("INSUFFICIENT_RESOURCES", "TOWN_HALL_REQUIRED"):
+            reason = "insufficient resources" if status == "INSUFFICIENT_RESOURCES" \
+                     else "Town Hall required"
+            logger.info("Lab research: %s — skipping", reason)
+        else:
+            logger.info("No confirm button found — skipping")
+
+        # Phase 4: Dismiss remaining popups after confirm
+        with get_session() as session:
+            close_roi = session.query(RoiTemplate).filter_by(
+                roi_name="btn_close_universal",
+            ).first()
+        if close_roi:
+            cx = close_roi.x_pos + close_roi.width // 2
+            cy = close_roi.y_pos + close_roi.height // 2
+            await human_tap(adb, cx, cy, sigma=3)
+            await human_delay(0.5, 1.0)
+
+        self._upgrade_target = None
+        logger.info("Laboratory upgrade completed")
 
     async def _do_upgrade_execute_template(self, adb):
         """Fallback: execute upgrade using template matching (original logic)."""
@@ -1167,64 +1421,26 @@ class SequenceRunner:
         logger.info("=== New Building Purchase & Deploy ===")
         self.current_screen = "shop"
 
-        # --- Phase A: Find and tap the arrow in Shop (AI only, full-res) ---
+        # --- Phase A: Find and tap the orange arrow in Shop via HSV ---
         screen = await adb.screencap()
         if not screen:
             return False
 
-        arrow_pos = None
-        ai = self._get_ai_client()
-        if not ai or not ai.available:
-            logger.warning("AI not available — cannot find Shop arrow")
+        import numpy as _np, cv2 as _cv2
+        _nparr = _np.frombuffer(screen, _np.uint8)
+        _img = _cv2.imdecode(_nparr, _cv2.IMREAD_COLOR)
+
+        from backend.engine.middleware import find_shop_arrow_cv
+
+        arrow_pos = find_shop_arrow_cv(_img)
+        if arrow_pos:
+            logger.info("Arrow found via CV at (%d,%d)", arrow_pos[0], arrow_pos[1])
+        else:
+            logger.warning("Could not find Shop arrow via CV — purchase aborted")
             return False
 
-        arrow_prompt = (
-            "You are a Clash of Clans bot assistant. This is a 1280x720 screenshot of "
-            "the Shop/Build menu. A new building is highlighted for purchase. "
-            "On the highlighted card there is a GREEN DOWNWARD-POINTING ARROW (⤓) "
-            "overlaid on the building picture. This arrow indicates the building can be "
-            "bought. Find the EXACT pixel center of that green arrow.\n"
-            "Return ONLY valid JSON:\n"
-            '{"buildings": [{"name": "Arrow", "x": 640, "y": 360, "cost": 0, '
-            '"resource": "gold"}]}\n'
-            "IMPORTANT: x must be 0-1279, y must be 0-719. The arrow is in the "
-            "main building list area (roughly y=200-500), not in the top tab bar "
-            "or bottom UI."
-        )
-
-        # Try AI at full resolution (small arrows need pixel-level detail)
-        result = ai.analyze_screenshot(screen, prompt_override=arrow_prompt, full_res=True)
-        if result and len(result) > 0:
-            arrow_pos = (result[0]["x"], result[0]["y"])
-            logger.info("Arrow found via AI at (%d,%d)", arrow_pos[0], arrow_pos[1])
-
-        # Validate coordinates are reasonable
-        if arrow_pos and (arrow_pos[0] < 100 or arrow_pos[0] > 1200
-                          or arrow_pos[1] < 150 or arrow_pos[1] > 550):
-            logger.warning("AI arrow coords unreasonable (%d,%d) — retrying",
-                           arrow_pos[0], arrow_pos[1])
-            # Retry once with explicit coordinate hint
-            result2 = ai.analyze_screenshot(
-                screen,
-                prompt_override=arrow_prompt + (
-                    "\n\nPREVIOUS ATTEMPT RETURNED INVALID COORDINATES. "
-                    "The green arrow is in the center area of the screen, roughly "
-                    "x=500-700, y=250-450. Look for the card with the green down-arrow "
-                    "on the building image."
-                ),
-                full_res=True,
-            )
-            if result2 and len(result2) > 0:
-                arrow_pos = (result2[0]["x"], result2[0]["y"])
-                logger.info("Arrow retry at (%d,%d)", arrow_pos[0], arrow_pos[1])
-            else:
-                arrow_pos = None
-
-        if not arrow_pos:
-            logger.warning("Could not find Shop arrow — purchase aborted")
-            return False
-
-        await human_tap(adb, arrow_pos[0], arrow_pos[1], sigma=5)
+        # Tap below arrow center — arrow points down at the building item
+        await human_tap(adb, arrow_pos[0], arrow_pos[1] + 40, sigma=5)
         await human_delay(1.5, 2.5)
 
         # --- Phase B: Verify we left Shop (entered deploy screen) ---
@@ -1236,32 +1452,24 @@ class SequenceRunner:
             screen, str(Path(self._TPL_DIR) / "icon_shop_tab.png"), threshold=0.6,
         )
         if shop_still:
-            # Still in Shop — arrow tap missed, retry once with AI if template was used
-            logger.warning("Still in Shop after tapping arrow — retrying with AI")
-            ai = self._get_ai_client()
-            if ai and ai.available:
-                arrow_prompt = (
-                    "You are a Clash of Clans bot assistant. Analyze this Shop screenshot "
-                    "(1280x720). Find the green arrow on the highlighted building card. "
-                    "Return ONLY valid JSON:\n"
-                    '{"buildings": [{"name": "Arrow", "x": 640, "y": 360, "cost": 0, '
-                    '"resource": "gold"}]}'
-                )
-                result = ai.analyze_screenshot(screen, prompt_override=arrow_prompt)
-                if result and len(result) > 0:
-                    await human_tap(adb, result[0]["x"], result[0]["y"], sigma=5)
-                    await human_delay(1.5, 2.5)
-                    screen = await adb.screencap()
-                    if screen and match_template(
-                        screen, str(Path(self._TPL_DIR) / "icon_shop_tab.png"),
-                        threshold=0.6,
-                    ):
-                        logger.warning("Still in Shop after retry — giving up")
-                        return False
-                else:
-                    logger.warning("AI could not find arrow on retry")
+            # Still in Shop — arrow tap missed, retry once with CV
+            logger.warning("Still in Shop after tapping arrow — retrying with CV")
+            import numpy as _np, cv2 as _cv2
+            _nparr = _np.frombuffer(screen, _np.uint8)
+            _retry_img = _cv2.imdecode(_nparr, _cv2.IMREAD_COLOR)
+            retry_pos = find_shop_arrow_cv(_retry_img)
+            if retry_pos:
+                await human_tap(adb, retry_pos[0], retry_pos[1] + 40, sigma=5)
+                await human_delay(1.5, 2.5)
+                screen = await adb.screencap()
+                if screen and match_template(
+                    screen, str(Path(self._TPL_DIR) / "icon_shop_tab.png"),
+                    threshold=0.6,
+                ):
+                    logger.warning("Still in Shop after retry — giving up")
                     return False
             else:
+                logger.warning("CV could not find arrow on retry")
                 return False
 
         logger.info("Deploy screen confirmed — building ready to place")
@@ -1280,9 +1488,11 @@ class SequenceRunner:
         # --- Phase C: HSV red detection for X button → calculate CK offset ---
         # Red (X button) is highly distinctive against green grass — near-zero false positives.
         # CoC deploy bar: X (red, left) always adjacent to checkmark (green, right) by ~48px.
+        # Search ONLY the game play area (y=150-580, x=250-1000) — excludes ALL HUD elements.
         valid = False
         ck_pos = None
         _HSV_OFFSET = 48  # px from X center to checkmark center at 1280x720
+        _ROI = {"y1": 150, "y2": 580, "x1": 250, "x2": 1000}  # game area only
 
         for attempt in range(1, 21):
             screen = await adb.screencap()
@@ -1294,10 +1504,14 @@ class SequenceRunner:
             _img = _cv2.imdecode(_nparr, _cv2.IMREAD_COLOR)
             img_h, img_w = _img.shape[:2]
 
-            # Search bottom 35% only — deploy buttons at very bottom
-            search_y1 = img_h * 65 // 100
-            bottom_region = _img[search_y1:img_h, 0:img_w]
-            hsv = _cv2.cvtColor(bottom_region, _cv2.COLOR_BGR2HSV)
+            # Crop to game play area only — excludes top menu, bottom HUD,
+            # left Attack/Social buttons, and right-edge UI
+            roi_x1 = _ROI["x1"]
+            roi_y1 = _ROI["y1"]
+            roi_x2 = min(_ROI["x2"], img_w)
+            roi_y2 = min(_ROI["y2"], img_h)
+            roi = _img[roi_y1:roi_y2, roi_x1:roi_x2]
+            hsv = _cv2.cvtColor(roi, _cv2.COLOR_BGR2HSV)
 
             # Red mask: H in [0-10] or [170-180], S >= 150, V >= 150
             lower_r1 = _np.array([0, 150, 150])
@@ -1312,21 +1526,20 @@ class SequenceRunner:
                 red_mask, _cv2.RETR_TREE, _cv2.CHAIN_APPROX_SIMPLE,
             )
 
-            # Find best X candidate: area 150-2000, x < 70% screen width
+            # Find best X candidate in game area: area 150-2000
             x_pos = None
             for cnt in sorted(contours, key=_cv2.contourArea, reverse=True):
                 area = _cv2.contourArea(cnt)
                 if area < 150 or area > 2000:
                     continue
                 bx, by, bw, bh = _cv2.boundingRect(cnt)
-                cx = bx + bw // 2
-                cy = by + bh // 2 + search_y1
-                if cx < img_w * 70 // 100:  # reject far-right UI
-                    x_pos = (cx, cy)
-                    break
+                cx = bx + bw // 2 + roi_x1
+                cy = by + bh // 2 + roi_y1
+                x_pos = (cx, cy)
+                break
 
             if not x_pos:
-                logger.info("No red X button in bottom region #%d", attempt)
+                logger.info("No red X button in game area #%d", attempt)
             else:
                 ck_x = x_pos[0] + _HSV_OFFSET
                 ck_y = x_pos[1]
@@ -1349,8 +1562,10 @@ class SequenceRunner:
                     logger.info("X at (%d,%d) but no green at CK — keep dragging #%d",
                                 x_pos[0], x_pos[1], attempt)
 
-            dx = random.randint(-250, 250)
-            dy = random.randint(-200, 200)
+            # Drag to move building. Use wider range if stuck on same position.
+            drag_range = 300 if attempt > 5 else 200
+            dx = random.randint(-drag_range, drag_range)
+            dy = random.randint(-drag_range, drag_range)
             await adb.swipe(640, 400, 640 + dx, 400 + dy, duration_ms=200)
             await human_delay(0.4, 0.6)
 
@@ -1369,10 +1584,9 @@ class SequenceRunner:
             import numpy as _np, cv2 as _cv2
             _dbg = _cv2.imdecode(_np.frombuffer(debug_screen, _np.uint8), _cv2.IMREAD_COLOR)
             dbg_h, dbg_w = _dbg.shape[:2]
-            dbg_y1 = dbg_h * 65 // 100
-            dbg_hsv = _cv2.cvtColor(
-                _dbg[dbg_y1:dbg_h, 0:dbg_w], _cv2.COLOR_BGR2HSV,
-            )
+            dbg_roi = _dbg[_ROI["y1"]:min(_ROI["y2"], dbg_h),
+                           _ROI["x1"]:min(_ROI["x2"], dbg_w)]
+            dbg_hsv = _cv2.cvtColor(dbg_roi, _cv2.COLOR_BGR2HSV)
             dbg_red = _cv2.inRange(dbg_hsv, lower_r1, upper_r1) | _cv2.inRange(
                 dbg_hsv, lower_r2, upper_r2,
             )
@@ -1386,11 +1600,10 @@ class SequenceRunner:
                 if area < 150 or area > 2000:
                     continue
                 bx, by, bw, bh = _cv2.boundingRect(cnt)
-                cx = bx + bw // 2
-                cy = by + bh // 2 + dbg_y1
-                if cx < dbg_w * 70 // 100:
-                    x_reverify = (cx, cy)
-                    break
+                cx = bx + bw // 2 + _ROI["x1"]
+                cy = by + bh // 2 + _ROI["y1"]
+                x_reverify = (cx, cy)
+                break
 
             if x_reverify:
                 ck_rx = x_reverify[0] + _HSV_OFFSET
@@ -1414,35 +1627,113 @@ class SequenceRunner:
             _cv2.imwrite("storage/debug/checkmark_tap_target.png", _dbg)
             logger.info("Debug: checkmark target saved at (%d,%d)", ck_pos[0], ck_pos[1])
 
+        # Tap checkmark to confirm deployment
         await human_tap(adb, ck_pos[0], ck_pos[1], sigma=3)
-        await human_delay(1.0, 2.0)
+        await human_delay(1.5, 2.0)
+
+        # --- Post-tap verification: confirm deploy buttons are gone ---
+        final_screen = await adb.screencap()
+        if final_screen:
+            import numpy as _np, cv2 as _cv2
+            _fimg = _cv2.imdecode(
+                _np.frombuffer(final_screen, _np.uint8), _cv2.IMREAD_COLOR,
+            )
+            fh, fw = _fimg.shape[:2]
+            froi = _fimg[_ROI["y1"]:min(_ROI["y2"], fh),
+                         _ROI["x1"]:min(_ROI["x2"], fw)]
+            fhsv = _cv2.cvtColor(froi, _cv2.COLOR_BGR2HSV)
+            fred = _cv2.inRange(fhsv, lower_r1, upper_r1) | _cv2.inRange(
+                fhsv, lower_r2, upper_r2,
+            )
+            fcnts, _ = _cv2.findContours(
+                fred, _cv2.RETR_TREE, _cv2.CHAIN_APPROX_SIMPLE,
+            )
+            still_has_x = False
+            for cnt in fcnts:
+                area = _cv2.contourArea(cnt)
+                if 150 < area < 2000:
+                    cx = _cv2.boundingRect(cnt)[0] + _cv2.boundingRect(cnt)[2] // 2 + _ROI["x1"]
+                    cy = _cv2.boundingRect(cnt)[1] + _cv2.boundingRect(cnt)[3] // 2 + _ROI["y1"]
+                    if cx > _ROI["x1"] and cx < _ROI["x2"]:
+                        still_has_x = True
+                        logger.warning("Deploy button STILL at (%d,%d) — tap missed!", cx, cy)
+                        break
+
+            if still_has_x:
+                logger.warning("Deploy not confirmed — retrying tap at (%d,%d)",
+                               ck_pos[0], ck_pos[1])
+                await human_tap(adb, ck_pos[0], ck_pos[1], sigma=2)
+                await human_delay(1.5, 2.0)
+            else:
+                logger.info("Deploy confirmed — buttons no longer visible")
 
         logger.info("New building purchased and deployed successfully")
         self._upgrade_target = None
         return True
 
     async def _poll_countdown_then_return(self, adb):
-        """Poll countdown timer; when it disappears, battle is over."""
+        """Poll countdown timer; when it disappears, battle is over.
+
+        After battle ends: checks for Claim Reward / Return Home buttons first,
+        then exits. Guards against Shop/menu accidentally opening mid-attack.
+        """
         from backend.vision.matching import match_template
+        from backend.engine.middleware import resolve_blockers, _find_return_home_button, _find_claim_reward_button
+        import numpy as _np, cv2 as _cv2
+        import time as _time
+
         TPL_COUNTDOWN = f"{self._TPL_DIR}/btn_countdown.png"
 
         logger.info("Watching countdown timer...")
+        _start = _time.monotonic()
+        _max_watch = 240  # max 4 minutes — safety timeout
         while self._running:
-            await asyncio.sleep(3)
-            screen = await adb.screencap()
-            if screen and not match_template(screen, TPL_COUNTDOWN, threshold=0.40):
-                logger.info("Countdown disappeared — battle over")
+            if _time.monotonic() - _start > _max_watch:
+                logger.warning("Countdown watch timeout (%ds) — forcing exit", _max_watch)
                 return
 
-    async def _do_return_home(self, adb):
-        """Tap the return-home button using calibrated ROI coordinates.
+            await asyncio.sleep(3)
+            screen = await adb.screencap()
+            if not screen:
+                continue
 
-        The button position is fixed relative to 1280x720 resolution.
-        Calibrate via the Calibrator tab (btn_return_home ROI).
-        Falls back to hardcoded center-bottom if ROI not found.
+            _img = _cv2.imdecode(_np.frombuffer(screen, _np.uint8), _cv2.IMREAD_COLOR)
+            hsv = _cv2.cvtColor(_img, _cv2.COLOR_BGR2HSV)
+            countdown_found = match_template(screen, TPL_COUNTDOWN, threshold=0.40)
+
+            # Check for troop bar (attack screen)
+            troop_bar_roi = _img[_img.shape[0] - 120:_img.shape[0], 0:_img.shape[1]]
+            troop_hsv = _cv2.cvtColor(troop_bar_roi, _cv2.COLOR_BGR2HSV)
+            grey_mask = _cv2.inRange(
+                troop_hsv, _np.array([0, 0, 40]), _np.array([180, 30, 180]),
+            )
+            has_troop_bar = _np.count_nonzero(grey_mask) / grey_mask.size > 0.15
+
+            if countdown_found or has_troop_bar:
+                continue  # battle still in progress
+
+            # Both countdown and troop bar gone — battle likely ended.
+            end_pos = _find_claim_reward_button(hsv) or _find_return_home_button(hsv)
+            if end_pos:
+                logger.info("Battle finished — tapping end screen at (%d,%d)", end_pos[0], end_pos[1])
+                await human_tap(adb, end_pos[0], end_pos[1], sigma=5)
+                await human_delay(2.5, 3.5)
+                return
+
+            # Fallback: HSV detection failed but battle is definitely over.
+            logger.warning("Battle finished but HSV missed button — tapping fallback (500, 660)")
+            await human_tap(adb, 500, 660, sigma=10)
+            await human_delay(2.5, 3.5)
+            return
+
+    async def _do_return_home(self, adb):
+        """Tap return-home and verify we reach the village screen.
+
+        Loops up to 3 times — if after tapping return home the Attack
+        button isn't visible, taps return home again and retries.
         """
         self.state = "RETURNING"
-        logger.info("Returning home — tapping return home button...")
+        logger.info("Returning home...")
 
         with get_session() as session:
             from backend.db.models import RoiTemplate
@@ -1450,16 +1741,19 @@ class SequenceRunner:
         if home_roi:
             cx = home_roi.x_pos + home_roi.width // 2
             cy = home_roi.y_pos + home_roi.height // 2
-            logger.info("Return home at (%d,%d) via calibrated ROI", cx, cy)
         else:
             cx, cy = 640, 650
-            logger.info("Return home at (%d,%d) via fallback", cx, cy)
 
-        await human_tap(adb, cx, cy, sigma=15)
-        await human_delay(3.0, 5.0)
+        for retry in range(3):
+            logger.info("Return home attempt %d/3 at (%d,%d)", retry + 1, cx, cy)
+            await human_tap(adb, cx, cy, sigma=15)
+            await human_delay(3.0, 5.0)
 
-        # Dismiss any event/gacha popup that appeared during transition
-        await self._verify_home_screen(adb)
+            # Confirm we actually reached home
+            if await self._is_home_screen(adb):
+                logger.info("Home screen confirmed after %d attempt(s)", retry + 1)
+                break
+            logger.warning("Home screen NOT confirmed — retrying...")
 
         # Log attack
         self.raids_completed += 1
