@@ -105,6 +105,16 @@ def read_number(screenshot: bytes, x: int, y: int, width: int, height: int,
         return None
 
 
+def _parse_ratio(text_results) -> tuple[int, int] | None:
+    if not text_results:
+        return None
+    text = " ".join(text_results)
+    m = re.search(r'(\d+)\s*/\s*(\d+)', text)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
 def read_ratio(screenshot: bytes, x: int, y: int, width: int, height: int,
                roi_name: str = "") -> tuple[int, int] | None:
     """Read a 'used/total' ratio (e.g. '0/1', '2/5') from a region.
@@ -135,16 +145,9 @@ def read_ratio(screenshot: bytes, x: int, y: int, width: int, height: int,
 
         reader = _get_reader()
 
-        def _extract(text_results) -> tuple[int, int] | None:
-            text = " ".join(text_results)
-            m = re.search(r'(\d+)\s*/\s*(\d+)', text)
-            if m:
-                return int(m.group(1)), int(m.group(2))
-            return None
-
         # Pass 1: grayscale full-text OCR
         results = reader.readtext(gray, detail=0, paragraph=True)
-        pair = _extract(results)
+        pair = _parse_ratio(results)
         if pair:
             logger.info("read_ratio %s pass1: %r -> %s", roi_name or "generic", results, pair)
             return pair
@@ -154,14 +157,14 @@ def read_ratio(screenshot: bytes, x: int, y: int, width: int, height: int,
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         eroded = cv2.erode(binary, kernel, iterations=1)
         results2 = reader.readtext(eroded, detail=0, paragraph=True)
-        pair = _extract(results2)
+        pair = _parse_ratio(results2)
         if pair:
             logger.info("read_ratio %s pass2 (otsu): %r -> %s", roi_name or "generic", results2, pair)
             return pair
 
         # Pass 3: split ROI into halves and read each number separately
-        left = read_number(screenshot, x, y, width // 2, height)
-        right = read_number(screenshot, x + width // 2, y, width - width // 2, height)
+        left = read_number(screenshot, x, y, width // 2, height, roi_name=roi_name)
+        right = read_number(screenshot, x + width // 2, y, width - width // 2, height, roi_name=roi_name)
         if left is not None and right is not None:
             logger.info("read_ratio %s split: %d/%d", roi_name or "generic", left, right)
             return (left, right)

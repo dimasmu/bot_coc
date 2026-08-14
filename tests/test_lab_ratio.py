@@ -25,7 +25,7 @@ def test_read_ratio_unreadable_returns_none(monkeypatch):
             return []
 
     monkeypatch.setattr(ocr, "_get_reader", lambda: FakeReader())
-    monkeypatch.setattr(ocr, "read_number", lambda s, x, y, w, h: None)
+    monkeypatch.setattr(ocr, "read_number", lambda s, x, y, w, h, roi_name="": None)
 
     assert ocr.read_ratio(screen, 400, 20, 80, 30) is None
 
@@ -37,10 +37,30 @@ def test_read_ratio_split_fallback_returns_pair(monkeypatch):
         def readtext(self, *args, **kwargs):
             return []
 
-    def fake_read_number(s, x, y, w, h):
+    def fake_read_number(s, x, y, w, h, roi_name=""):
         return 0 if x < 440 else 1
 
     monkeypatch.setattr(ocr, "_get_reader", lambda: FakeReader())
     monkeypatch.setattr(ocr, "read_number", fake_read_number)
 
     assert ocr.read_ratio(screen, 400, 20, 80, 30) == (0, 1)
+
+
+def test_parse_ratio_matches_simple():
+    assert ocr._parse_ratio(["0/1"]) == (0, 1)
+
+
+def test_parse_ratio_matches_spaced():
+    assert ocr._parse_ratio(["0 / 1"]) == (0, 1)
+
+
+def test_parse_ratio_matches_joined_tokens():
+    assert ocr._parse_ratio(["2", "/", "5"]) == (2, 5)
+
+
+def test_parse_ratio_no_match_returns_none():
+    assert ocr._parse_ratio(["no digits"]) is None
+
+
+def test_parse_ratio_empty_returns_none():
+    assert ocr._parse_ratio([]) is None
