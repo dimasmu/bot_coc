@@ -100,7 +100,7 @@ import asyncio
 import pytest
 
 from backend.adb.mock import MockAdbManager
-from backend.engine.sequence_runner import SequenceRunner
+from backend.engine.sequence_runner import SequenceRunner, ScreenVerificationError
 
 
 def _make_screen_with_card(card_x: int = 380, card_top: int = 635,
@@ -188,7 +188,7 @@ async def test_is_card_depleted_returns_bool(runner):
 
 @pytest.mark.asyncio
 async def test_do_attack_no_cards():
-    """_do_attack with no detected cards should wait and return."""
+    """_do_attack with no detected cards raises ScreenVerificationError."""
     runner = SequenceRunner()
     runner._running = False  # prevent deploy loop
 
@@ -202,5 +202,5 @@ async def test_do_attack_no_cards():
     step = MagicMock()
     step.config_json = '{"duration": 1}'
 
-    await runner._do_attack(step, NoCardAdb())
-    # Should not raise — just sleep and return
+    with pytest.raises(ScreenVerificationError):
+        await runner._do_attack(step, NoCardAdb())
