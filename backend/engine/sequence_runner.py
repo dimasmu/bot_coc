@@ -940,6 +940,56 @@ class SequenceRunner:
         else:
             logger.warning("btn_close_universal ROI not calibrated")
 
+    async def _close_panel_until_gone(self, adb, max_attempts: int = 4) -> bool:
+        """Tap close repeatedly until no close button is detectable.
+
+        Each attempt detects the red X close button dynamically (HSV, via
+        the middleware detector) and taps it; when no X is found the panel
+        is assumed gone. The calibrated btn_close_universal ROI is used as
+        a one-shot fallback on the first attempt — modals' X positions vary
+        and the fixed ROI can miss (e.g. the lab confirm modal's X sits at
+        ~(1131, 56) while the ROI taps at ~(1229, 53)).
+
+        Returns True if the panel was closed (or no panel was detected).
+        """
+        from backend.engine.middleware import _find_close_x_button
+
+        for attempt in range(max_attempts):
+            screen = await adb.screencap()
+            if not screen:
+                return False
+
+            nparr = np.frombuffer(screen, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return False
+
+            pos = _find_close_x_button(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
+            if pos:
+                logger.info("Closing panel: red X found at (%d,%d)", pos[0], pos[1])
+                await human_tap(adb, pos[0], pos[1], sigma=3)
+                await human_delay(0.5, 1.0)
+                continue
+
+            if attempt == 0:
+                # No dynamic X — try the calibrated close ROI once.
+                with get_session() as session:
+                    close_roi = session.query(RoiTemplate).filter_by(
+                        roi_name="btn_close_universal").first()
+                if close_roi:
+                    cx = close_roi.x_pos + close_roi.width // 2
+                    cy = close_roi.y_pos + close_roi.height // 2
+                    logger.info("Closing panel: fallback tap at (%d,%d)", cx, cy)
+                    await human_tap(adb, cx, cy, sigma=5)
+                    await human_delay(0.5, 1.0)
+                    continue
+
+            logger.info("Panel closed — no close button detected")
+            return True
+
+        logger.warning("Panel still detected after %d close attempts", max_attempts)
+        return False
+
     def _save_lab_confirm_debug(self, screen):
         """Write the lab confirm panel screenshot to storage/debug."""
         import time as _time
@@ -1275,8 +1325,7 @@ class SequenceRunner:
         suggested_pos = find_text(screen, "Suggested")
         if not suggested_pos:
             logger.info("No 'Suggested upgrades:' in lab panel — closing panel")
-            await self._tap_close_universal(adb)
-            await human_delay(0.5, 1.0)
+            await self._close_panel_until_gone(adb)
             self._upgrade_target = None
             return
 
@@ -1304,21 +1353,16 @@ class SequenceRunner:
             await human_tap(adb, target_pos[0], target_pos[1], sigma=5)
             await human_delay(0.5, 1.0)
             logger.info("Lab research started!")
-            await self._tap_close_universal(adb)
-            await human_delay(0.5, 1.0)
+            await self._close_panel_until_gone(adb)
         elif status in ("INSUFFICIENT_RESOURCES", "TOWN_HALL_REQUIRED"):
             reason = "insufficient resources" if status == "INSUFFICIENT_RESOURCES" \
                      else "Town Hall required"
-            logger.warning("%s! Menutup modal 2x & pindah farming.", reason)
-            await self._tap_close_universal(adb)
-            await human_delay(0.5, 1.0)
-            await self._tap_close_universal(adb)
-            await human_delay(0.5, 1.0)
+            logger.warning("%s! Menutup modal & pindah farming.", reason)
+            await self._close_panel_until_gone(adb)
             self._loop_mode = "farming"
         else:
             logger.warning("Tombol CONFIRM tidak ditemukan — menutup modal.")
-            await self._tap_close_universal(adb)
-            await human_delay(0.5, 1.0)
+            await self._close_panel_until_gone(adb)
 
         self._upgrade_target = None
 

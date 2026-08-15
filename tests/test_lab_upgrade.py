@@ -40,7 +40,7 @@ class _FakeAdb:
 
 
 @pytest.mark.asyncio
-async def test_lab_upgrade_insufficient_resources_closes_twice_and_farming(monkeypatch):
+async def test_lab_upgrade_insufficient_resources_closes_panel_and_farming(monkeypatch):
     runner = SequenceRunner()
     runner._upgrade_target = {"type": "lab"}
     runner._loop_mode = "upgrade"
@@ -54,11 +54,11 @@ async def test_lab_upgrade_insufficient_resources_closes_twice_and_farming(monke
     async def fake_delay(*args, **kwargs):
         pass
 
-    async def fake_close(adb):
+    async def fake_close_panel(adb):
         close_calls.append(1)
 
     monkeypatch.setattr(runner, "_read_lab_status", lambda screen: "free")
-    monkeypatch.setattr(runner, "_tap_close_universal", fake_close)
+    monkeypatch.setattr(runner, "_close_panel_until_gone", fake_close_panel)
     monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
     monkeypatch.setattr(seq_mod, "human_delay", fake_delay)
     monkeypatch.setattr("backend.db.database.get_session", lambda: _FakeSession())
@@ -67,7 +67,7 @@ async def test_lab_upgrade_insufficient_resources_closes_twice_and_farming(monke
 
     await runner._do_lab_upgrade(_FakeAdb())
 
-    assert len(close_calls) == 2
+    assert len(close_calls) == 1
     assert runner._loop_mode == "farming"
     assert runner._upgrade_target is None
 
@@ -87,11 +87,11 @@ async def test_lab_upgrade_no_suggested_closes_panel(monkeypatch):
     async def fake_delay(*args, **kwargs):
         pass
 
-    async def fake_close(adb):
+    async def fake_close_panel(adb):
         close_calls.append(1)
 
     monkeypatch.setattr(runner, "_read_lab_status", lambda screen: "free")
-    monkeypatch.setattr(runner, "_tap_close_universal", fake_close)
+    monkeypatch.setattr(runner, "_close_panel_until_gone", fake_close_panel)
     monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
     monkeypatch.setattr(seq_mod, "human_delay", fake_delay)
     monkeypatch.setattr("backend.db.database.get_session", lambda: _FakeSession())
