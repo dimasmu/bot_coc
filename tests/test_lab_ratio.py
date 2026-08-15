@@ -46,6 +46,19 @@ def test_read_ratio_split_fallback_returns_pair(monkeypatch):
     assert ocr.read_ratio(screen, 400, 20, 80, 30) == (0, 1)
 
 
+def test_read_ratio_reads_real_lab_badge():
+    """Integration: the calibrated lab_status ROI on a real home-screen
+    top bar (free lab, badge shows '1/1') must OCR as (1, 1).
+
+    Fixture is the top 100px strip of storage/debug/lab_debug_current.png.
+    """
+    from pathlib import Path
+
+    screen = Path(__file__).parent / "fixtures" / "lab_badge_free.png"
+    assert ocr.read_ratio(screen.read_bytes(), 474, 27, 58, 34,
+                          roi_name="lab_status") == (1, 1)
+
+
 def test_parse_ratio_matches_simple():
     assert ocr._parse_ratio(["0/1"]) == (0, 1)
 

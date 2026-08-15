@@ -117,10 +117,11 @@ def _parse_ratio(text_results) -> tuple[int, int] | None:
 
 def read_ratio(screenshot: bytes, x: int, y: int, width: int, height: int,
                roi_name: str = "") -> tuple[int, int] | None:
-    """Read a 'used/total' ratio (e.g. '0/1', '2/5') from a region.
+    """Read a 'used/total' ratio (e.g. '1/1', '2/5') from a region.
 
-    Uses the same grayscale + 2x + OTSU + erode fallback as read_number,
-    then falls back to reading the left/right halves separately.
+    Preprocessing: grayscale, 4x CUBIC upscale, then a plain OTSU fallback
+    (no erode — eroding fuses narrow glyphs like the lab badge's '1/1' into
+    unreadable blobs). Falls back to reading the left/right halves separately.
     Returns (used, total) or None if unreadable.
     """
     try:
@@ -140,23 +141,23 @@ def read_ratio(screenshot: bytes, x: int, y: int, width: int, height: int,
             return None
 
         roi = img[y1:y2, x1:x2]
-        roi = cv2.resize(roi, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+        roi = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
         reader = _get_reader()
 
         # Pass 1: grayscale full-text OCR
-        results = reader.readtext(gray, detail=0, paragraph=True)
+        results = reader.readtext(gray, detail=0, paragraph=True,
+                                  allowlist="0123456789/")
         pair = _parse_ratio(results)
         if pair:
             logger.info("read_ratio %s pass1: %r -> %s", roi_name or "generic", results, pair)
             return pair
 
-        # Pass 2: OTSU + erode fallback
+        # Pass 2: OTSU fallback
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        eroded = cv2.erode(binary, kernel, iterations=1)
-        results2 = reader.readtext(eroded, detail=0, paragraph=True)
+        results2 = reader.readtext(binary, detail=0, paragraph=True,
+                                   allowlist="0123456789/")
         pair = _parse_ratio(results2)
         if pair:
             logger.info("read_ratio %s pass2 (otsu): %r -> %s", roi_name or "generic", results2, pair)
