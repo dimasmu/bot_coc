@@ -138,10 +138,12 @@ class SequenceRunner:
                 step = steps[i]
                 try:
                     # Pre-step: verify we're on the expected screen
-                    if not await self._verify_step_screen(adb, step.step_type):
+                    if not await self._verify_step_screen(adb, step.step_type,
+                                                          roi_name=step.roi_name):
                         logger.warning("Step %s — wrong screen, recovering home", step.step_type)
                         await self._do_return_home(adb)
-                        if not await self._verify_step_screen(adb, step.step_type):
+                        if not await self._verify_step_screen(adb, step.step_type,
+                                                              roi_name=step.roi_name):
                             logger.error("Step %s — still wrong screen after recovery, skipping",
                                          step.step_type)
                             _last_failed_step_idx = -1
@@ -286,25 +288,34 @@ class SequenceRunner:
 
         return False
 
-    async def _verify_step_screen(self, adb, step_type: str) -> bool:
+    async def _verify_step_screen(self, adb, step_type: str,
+                                  roi_name: str | None = None) -> bool:
         """Verify the expected screen is visible before executing a step.
-        Returns True if screen matches, False if recovery is needed."""
+        Returns True if screen matches, False if recovery is needed.
+
+        Only steps that start ON the home screen are checked against it
+        (btn_attack tap at loop start, upgrade steps). Mid-attack steps
+        (wait, btn_find_match/myarmy_btn_attack taps, search, attack) run
+        on screens that change mid-flow — pre-checking them would derail
+        the sequence; they are protected by the internal verifiers instead
+        (_verify_search_screen, _detect_cards in _do_attack).
+        """
         if step_type in ("return_home",):
             return True  # return_home IS the recovery — always allow
 
-        if step_type in ("upgrade_check", "upgrade_execute", "tap", "wait"):
+        if step_type in ("upgrade_check", "upgrade_execute"):
             if not await self._is_home_screen(adb):
                 logger.warning("Step '%s': NOT on home screen", step_type)
                 return False
             return True
 
-        if step_type in ("search", "attack"):
-            if not await self._is_attack_screen(adb):
-                logger.warning("Step '%s': NOT on attack screen", step_type)
+        if step_type == "tap" and roi_name == "btn_attack":
+            if not await self._is_home_screen(adb):
+                logger.warning("Step 'tap btn_attack': NOT on home screen")
                 return False
             return True
 
-        return True  # unknown step types pass through
+        return True  # wait / mid-attack taps / search / attack pass through
 
     # ── End Pre-Step Screen Verification ─────────────────────────────
 
