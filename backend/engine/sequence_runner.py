@@ -879,13 +879,14 @@ class SequenceRunner:
     def _read_lab_status(self, screen) -> str:
         """Read lab research status from the calibrated lab_status ROI.
 
-        OCRs the '0/1' digits only (not the icon). Uses read_ratio which
-        mirrors read_number's grayscale + OTSU + erode fallback.
+        OCRs the 'X/Y' badge digits only (not the icon). The number
+        BEFORE the slash is the available-upgrade count — same rule as
+        the builder count: 0 → nothing available, >=1 → available.
 
         Returns:
-            'free'  — used == 0, lab available for research
-            'busy'  — used > 0, research in progress
-            'unknown' — OCR failed or ROI not calibrated
+            'free'  — used >= 1, lab upgrade available
+            'busy'  — used == 0, research in progress / nothing available
+            'unknown' — OCR failed, garbage ratio, or ROI not calibrated
         """
         if not screen:
             return "unknown"
@@ -899,13 +900,22 @@ class SequenceRunner:
         pair = read_ratio(screen, lab_roi.x_pos, lab_roi.y_pos,
                           lab_roi.width, lab_roi.height, roi_name="lab_status")
         if pair is None:
+            # One retry — the small badge occasionally OCRs as garbage
+            pair = read_ratio(screen, lab_roi.x_pos, lab_roi.y_pos,
+                              lab_roi.width, lab_roi.height,
+                              roi_name="lab_status")
+        if pair is None:
             return "unknown"
 
-        used, _ = pair
-        logger.info("Lab status OCR: %d/%d", used, pair[1])
+        used, total = pair
+        logger.info("Lab status OCR: %d/%d", used, total)
+        if used > total:
+            logger.warning("Lab status OCR implausible (%d/%d) — treating as unknown",
+                           used, total)
+            return "unknown"
         if used == 0:
-            return "free"
-        return "busy"
+            return "busy"
+        return "free"
 
     async def _tap_close_universal(self, adb):
         """Tap the global close button (btn_close_universal ROI)."""
