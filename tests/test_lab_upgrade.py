@@ -72,7 +72,7 @@ def _patch_lab_common(monkeypatch, runner, tap_log, analyze_results):
         lambda screen, region=None, min_conf=0.3: _ROWS,
     )
     monkeypatch.setattr(
-        seq_mod, "analyze_lab_confirm_button", lambda img: next(results)
+        seq_mod, "analyze_upgrade_confirm_button", lambda img: next(results)
     )
     return close_calls
 

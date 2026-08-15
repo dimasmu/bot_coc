@@ -1,4 +1,4 @@
-"""Tests for analyze_lab_confirm_button — lab research confirm modal.
+"""Tests for analyze_upgrade_confirm_button — lab research confirm modal.
 
 The building-modal template matcher mislocates the lab Research button
 (real captures: template lands at (986,547) while the button is at
@@ -24,7 +24,7 @@ _BTN_BOX = (797, 587, 998, 672)
 
 def test_ready_fixture_returns_position_inside_button():
     img = cv2.imread(_fixture("lab_confirm_ready.png"))
-    status, pos = vision.analyze_lab_confirm_button(img)
+    status, pos = vision.analyze_upgrade_confirm_button(img)
     assert status == "READY"
     assert pos is not None
     x, y = pos
@@ -34,13 +34,13 @@ def test_ready_fixture_returns_position_inside_button():
 
 def test_insufficient_fixture_detects_red_cost():
     img = cv2.imread(_fixture("lab_confirm_insufficient.png"))
-    status, pos = vision.analyze_lab_confirm_button(img)
+    status, pos = vision.analyze_upgrade_confirm_button(img)
     assert status == "INSUFFICIENT_RESOURCES"
     assert pos is None
 
 
 def test_no_green_button_returns_not_found():
     img = np.zeros((720, 1280, 3), dtype=np.uint8)
-    status, pos = vision.analyze_lab_confirm_button(img)
+    status, pos = vision.analyze_upgrade_confirm_button(img)
     assert status == "NOT_FOUND"
     assert pos is None

@@ -12,7 +12,7 @@ import numpy as np
 from backend.adb.manager import adb_manager
 from backend.humanize import human_tap, human_delay
 from backend.vision.ocr import read_number, read_ratio
-from backend.vision import analyze_confirm_button, analyze_lab_confirm_button
+from backend.vision import analyze_upgrade_confirm_button
 from sqlmodel import select
 from backend.db.database import get_session
 from backend.db.models import RoiTemplate, Config, AttackLog
@@ -1296,25 +1296,26 @@ class SequenceRunner:
             return
         await human_delay(1.0, 2.0)
 
-        # Phase 3: Find Confirm button via template matching
-        # Only scans bottom-right of the upgrade modal (x:600-800, y:580-700)
-        # to avoid false positives on HP bars and grass terrain.
+        # Phase 3: Find + tap the green Confirm button via HSV wide-button
+        # detector. Template matcher lama meleset (match lemah 0.51 di
+        # (986,547)) sementara tombol asli di (897,629) — sama seperti
+        # modal lab. Verifikasi pasca-tap: tombol harus hilang.
         screen = await adb.screencap()
         if not screen:
             self._upgrade_target = None
             return
-        import numpy as _np, cv2 as _cv2, os as _os
-        _nparr = _np.frombuffer(screen, _np.uint8)
-        _cimg = _cv2.imdecode(_nparr, _cv2.IMREAD_COLOR)
+        import os as _os
+        _nparr = np.frombuffer(screen, np.uint8)
+        _cimg = cv2.imdecode(_nparr, cv2.IMREAD_COLOR)
 
         # DEBUG: Save screenshot before confirm detection
         self._confirm_debug_counter += 1
         _os.makedirs("storage/debug", exist_ok=True)
-        _cv2.imwrite(f"storage/debug/confirm_debug_{self._confirm_debug_counter}.png", _cimg)
+        cv2.imwrite(f"storage/debug/confirm_debug_{self._confirm_debug_counter}.png", _cimg)
         logger.info("Debug: confirm_debug_%d.png saved", self._confirm_debug_counter)
 
         # Analyze confirm button status
-        status, target_pos = analyze_confirm_button(_cimg)
+        status, target_pos = analyze_upgrade_confirm_button(_cimg)
 
         if status == "READY":
             click_x, click_y = target_pos
@@ -1323,6 +1324,29 @@ class SequenceRunner:
             )
             await human_tap(adb, click_x, click_y, sigma=5)
             await human_delay(1.5, 2.5)
+
+            # Verifikasi: tombol hilang = upgrade dimulai. Retap sekali
+            # kalau masih ada; jangan klaim sukses tanpa bukti.
+            confirmed = False
+            for _ in range(2):
+                v = await adb.screencap()
+                if not v:
+                    break
+                _v = cv2.imdecode(np.frombuffer(v, np.uint8),
+                                  cv2.IMREAD_COLOR)
+                if _v is not None:
+                    st2, _ = analyze_upgrade_confirm_button(_v)
+                    if st2 != "READY":
+                        confirmed = True
+                        break
+                logger.warning("Confirm button masih ada — retap")
+                await human_tap(adb, click_x, click_y, sigma=2)
+                await human_delay(1.0, 1.5)
+            if not confirmed:
+                logger.warning("Confirm tidak terkonfirmasi — menutup modal")
+                await self._close_panel_until_gone(adb)
+                self._upgrade_target = None
+                return
             logger.info("Upgrade berhasil dimulai!")
 
         elif status in ("INSUFFICIENT_RESOURCES", "TOWN_HALL_REQUIRED"):
@@ -1366,7 +1390,7 @@ class SequenceRunner:
         Flow:
           1. Tap calibrated lab_upgrade ROI → opens research panel
           2. OCR "Suggested upgrades:" label + all research rows
-          3. Try each row top-to-bottom: analyze_lab_confirm_button →
+          3. Try each row top-to-bottom: analyze_upgrade_confirm_button →
              confirm the first affordable one (red cost = skip row)
           4. Farming only when no row was affordable (resource kurang)
         """
@@ -1446,7 +1470,7 @@ class SequenceRunner:
             self._save_lab_confirm_debug(screen)
 
             _cimg = cv2.imdecode(np.frombuffer(screen, np.uint8), cv2.IMREAD_COLOR)
-            status, target_pos = analyze_lab_confirm_button(_cimg)
+            status, target_pos = analyze_upgrade_confirm_button(_cimg)
 
             if status == "READY":
                 logger.info("Phase 3: confirming '%s' at (%d,%d)",
@@ -1462,7 +1486,7 @@ class SequenceRunner:
                         break
                     _img2 = cv2.imdecode(np.frombuffer(screen2, np.uint8),
                                          cv2.IMREAD_COLOR)
-                    st2, pos2 = analyze_lab_confirm_button(_img2)
+                    st2, pos2 = analyze_upgrade_confirm_button(_img2)
                     if st2 != "READY":
                         started = True
                         break

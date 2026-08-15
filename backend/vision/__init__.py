@@ -61,14 +61,14 @@ def _confirm_cost_is_red(image: np.ndarray,
     return int(red.sum()) > area * 0.03
 
 
-def analyze_lab_confirm_button(image):
-    """Analisis tombol research pada modal konfirmasi laboratorium.
+def analyze_upgrade_confirm_button(image):
+    """Analisis tombol hijau konfirmasi pada modal UPGRADE (lab & bangunan).
 
-    Modal lab berlatar kayu gelap (tanpa rumput), jadi tombol hijau
-    Research bisa dideteksi langsung via HSV di ROI kanan-bawah yang
-    ketat. Template matcher untuk modal bangunan salah posisi di sini —
-    terverifikasi di capture asli: template match jatuh di (986,547)
-    sementara tombol sebenarnya di (897,629) — sehingga tap meleset.
+    Tombol hijau "Research"/"Upgrade" kedua jenis modal berada di
+    kanan-bawah (terukur konsisten: box (797,587,201x85), pusat
+    (897,629)). Deteksi HSV langsung di ROI kanan-bawah yang ketat —
+    template matcher LAMA salah posisi di kedua modal (match lemah
+    0.51 di (986,547) → tap meleset).
 
     Returns:
         - ("READY", (cx, cy)): tombol hijau, resource cukup.
@@ -91,11 +91,14 @@ def analyze_lab_confirm_button(image):
     contours, _ = cv2.findContours(
         green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
     )
-    # Tombol research berbentuk lebar (w/h > 1.4) — menyaring elemen
-    # hijau lain seperti ikon elixir atau ribbon.
+    # Tombol confirm hijau punya ukuran/aspect khas: area 10k-25k px,
+    # aspect 1.6-2.8 (terukur 16,616 px / 2.36 konsisten). Ini menyaring:
+    # ikon kecil, tombol "Finish Now" (8.4k, panel in-progress setelah
+    # upgrade dimulai), dan blob rumput yang menyatu (42k / aspect 3.1).
     wide = [c for c in contours
-            if cv2.contourArea(c) > 3000
-            and cv2.boundingRect(c)[2] / max(cv2.boundingRect(c)[3], 1) > 1.4]
+            if 10_000 <= cv2.contourArea(c) <= 25_000
+            and 1.6 <= cv2.boundingRect(c)[2] / max(cv2.boundingRect(c)[3], 1)
+            <= 2.8]
     if not wide:
         return ("NOT_FOUND", None)
 
@@ -110,141 +113,3 @@ def analyze_lab_confirm_button(image):
     return ("READY", (cx, cy))
 
 
-def analyze_confirm_button(image):
-    """Menganalisis status tombol CONFIRM pada modal Upgrade.
-
-    Detection priority:
-      1. Template matching (lowered threshold 0.45)
-      2. HSV green button detection (fallback)
-      2.5. Grey button detection (Town Hall required)
-      3. Red cost numbers (insufficient resources)
-
-    Returns:
-        - ("READY", (center_x, center_y)): Resource CUKUP, tombol siap diklik.
-        - ("INSUFFICIENT_RESOURCES", None): Resource KURANG (Angka biaya
-        berwarna MERAH).
-        - ("TOWN_HALL_REQUIRED", None): Tombol abu-abu — upgrade butuh
-        Town Hall level lebih tinggi.
-        - ("NOT_FOUND", None): Tombol CONFIRM tidak ditemukan di layar.
-    """
-    h, w = image.shape[:2]
-
-    # ── Method 1: Template matching (lowered threshold) ──
-    confirm_templates = [
-        "storage/templates/btn_upgrade_confirm_1.png",
-        "storage/templates/btn_upgrade_confirm_2.png"
-    ]
-
-    best_score = 0
-    best_pos = None
-    best_tw = best_th = 0
-    for template_path in confirm_templates:
-        tpl = cv2.imread(template_path)
-        if tpl is None:
-            continue
-        gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        gray_tpl = cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY)
-        result = cv2.matchTemplate(gray_img, gray_tpl, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
-        th, tw = tpl.shape[:2]
-        pos = (max_loc[0] + tw // 2, max_loc[1] + th // 2)
-
-        print(f"[CV CHECK] Template {template_path}: score={max_val:.4f} at {pos}")
-
-        if max_val > best_score:
-            best_score = max_val
-            best_pos = pos
-            best_tw, best_th = tw, th
-
-    if best_score >= 0.50:
-        # Sanity check: genuine confirm buttons are never in the left 30%.
-        # False positives from bright UI elements (elixir icons, etc.) often
-        # match at x < 300 with similar scores to real confirm buttons (0.50-0.53).
-        if best_pos[0] < w * 0.3:
-            print(f"[CV CHECK] Template match rejected — X={best_pos[0]} < {int(w*0.3)} (false positive)")
-        elif _confirm_cost_is_red(
-                image, (best_pos[0] - best_tw // 2, best_pos[1] - best_th // 2,
-                        best_tw, best_th)):
-            print(f"[CV CHECK] Template match at {best_pos} has red cost digits "
-                  f"-> INSUFFICIENT_RESOURCES")
-            return ("INSUFFICIENT_RESOURCES", None)
-        else:
-            print(f"[CV CHECK] Template match: score={best_score:.4f} at {best_pos} -> READY")
-            return ("READY", best_pos)
-
-    # ── Method 2: HSV green button detection (fallback) ──
-    # ROI: bottom 40%, right 75% of screen.
-    # Lab confirm buttons appear near center (x~500); building buttons
-    # at bottom-right (x~900). Wider ROI covers both.
-    roi_x1 = int(w * 0.25)
-    roi_y1 = int(h * 0.60)
-    roi_x2 = w
-    roi_y2 = h
-    roi = image[roi_y1:roi_y2, roi_x1:roi_x2]
-    hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-    # Green range: bright greens found in CoC confirm/upgrade buttons
-    lower_green = np.array([35, 100, 100])
-    upper_green = np.array([85, 255, 255])
-    green_mask = cv2.inRange(hsv_roi, lower_green, upper_green)
-
-    # Find green contours in ROI
-    contours, _ = cv2.findContours(
-        green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
-    )
-    green_contours = [c for c in contours if cv2.contourArea(c) > 200]
-    total_green = cv2.countNonZero(green_mask)
-
-    print(f"[CV CHECK] HSV green: {len(green_contours)} contours, {total_green} px in ROI")
-
-    if green_contours:
-        # Take largest green contour as confirm button
-        best_cnt = max(green_contours, key=cv2.contourArea)
-        bx, by, bw, bh = cv2.boundingRect(best_cnt)
-        cx = bx + bw // 2 + roi_x1
-        cy = by + bh // 2 + roi_y1
-        area = cv2.contourArea(best_cnt)
-        print(f"[CV CHECK] HSV green button: area={area:.0f} at ({cx},{cy}) -> READY")
-        return ("READY", (cx, cy))
-
-    # ── Method 2.5: Grey (disabled) button detection ──
-    # A grey confirm button means: upgrade requires higher Town Hall level.
-    # Detection: low saturation in the same ROI as green button search.
-    grey_lower = np.array([0, 0, 100])
-    grey_upper = np.array([180, 50, 255])
-    grey_mask = cv2.inRange(hsv_roi, grey_lower, grey_upper)
-    grey_contours, _ = cv2.findContours(
-        grey_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
-    )
-    grey_contours = [c for c in grey_contours if cv2.contourArea(c) > 200]
-    total_grey = cv2.countNonZero(grey_mask)
-
-    if grey_contours and total_grey > 500:
-        print(f"[CV CHECK] Grey disabled button: {len(grey_contours)} contours, "
-              f"{total_grey} px -> TOWN_HALL_REQUIRED")
-        return ("TOWN_HALL_REQUIRED", None)
-
-    # ── Method 3: Red cost number detection (insufficient resources) ──
-    y1, y2 = int(h * 0.78), int(h * 0.84)
-    x1, x2 = int(w * 0.45), int(w * 0.55)
-
-    cost_crop = image[y1:y2, x1:x2]
-    hsv_cost = cv2.cvtColor(cost_crop, cv2.COLOR_BGR2HSV)
-
-    lower_red1 = np.array([0, 130, 130])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 130, 130])
-    upper_red2 = np.array([180, 255, 255])
-
-    red_mask = cv2.inRange(hsv_cost, lower_red1, upper_red1) + cv2.inRange(
-        hsv_cost, lower_red2, upper_red2
-    )
-
-    red_pixels = cv2.countNonZero(red_mask)
-
-    if red_pixels > 30:
-        print(f"[CV CHECK] Angka biaya berwarna MERAH ({red_pixels} px) -> Resource tidak cukup!")
-        return ("INSUFFICIENT_RESOURCES", None)
-
-    print(f"[CV CHECK] NOT_FOUND (best tpl={best_score:.4f}, green px={total_green}, red px={red_pixels})")
-    return ("NOT_FOUND", None)
