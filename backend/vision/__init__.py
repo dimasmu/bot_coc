@@ -61,6 +61,55 @@ def _confirm_cost_is_red(image: np.ndarray,
     return int(red.sum()) > area * 0.03
 
 
+def analyze_lab_confirm_button(image):
+    """Analisis tombol research pada modal konfirmasi laboratorium.
+
+    Modal lab berlatar kayu gelap (tanpa rumput), jadi tombol hijau
+    Research bisa dideteksi langsung via HSV di ROI kanan-bawah yang
+    ketat. Template matcher untuk modal bangunan salah posisi di sini —
+    terverifikasi di capture asli: template match jatuh di (986,547)
+    sementara tombol sebenarnya di (897,629) — sehingga tap meleset.
+
+    Returns:
+        - ("READY", (cx, cy)): tombol hijau, resource cukup.
+        - ("INSUFFICIENT_RESOURCES", None): angka biaya merah di dalam tombol.
+        - ("NOT_FOUND", None): tidak ada tombol hijau di ROI (termasuk
+          tombol abu-abu Town Hall required — tidak bisa dibedakan andal
+          karena tombol Hammer of Fighting juga abu-abu di ROI ini).
+    """
+    h, w = image.shape[:2]
+    x1, y1 = int(w * 0.55), int(h * 0.75)
+    x2, y2 = int(w * 0.95), h
+
+    roi = image[y1:y2, x1:x2]
+    hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+    lower_green = np.array([35, 100, 100])
+    upper_green = np.array([85, 255, 255])
+    green_mask = cv2.inRange(hsv_roi, lower_green, upper_green)
+
+    contours, _ = cv2.findContours(
+        green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+    )
+    # Tombol research berbentuk lebar (w/h > 1.4) — menyaring elemen
+    # hijau lain seperti ikon elixir atau ribbon.
+    wide = [c for c in contours
+            if cv2.contourArea(c) > 3000
+            and cv2.boundingRect(c)[2] / max(cv2.boundingRect(c)[3], 1) > 1.4]
+    if not wide:
+        return ("NOT_FOUND", None)
+
+    best = max(wide, key=cv2.contourArea)
+    bx, by, bw, bh = cv2.boundingRect(best)
+    box = (bx + x1, by + y1, bw, bh)
+    cx = bx + bw // 2 + x1
+    cy = by + bh // 2 + y1
+
+    if _confirm_cost_is_red(image, box):
+        return ("INSUFFICIENT_RESOURCES", None)
+    return ("READY", (cx, cy))
+
+
 def analyze_confirm_button(image):
     """Menganalisis status tombol CONFIRM pada modal Upgrade.
 

@@ -55,7 +55,9 @@ def init_db():
         ("de_number", "read", 22, 164, 150, 43),
         ("btn_return_home", "tap", 50, 580, 160, 100),
         ("btn_surrender", "tap", 80, 660, 100, 50),
-        ("builder_menu", "tap", 70, 575, 100, 80),
+        # Badge builder di top bar (bukan tombol bawah-kiri — itu membuka
+        # menu battle). Badge selalu di samping badge lab, posisi tetap.
+        ("builder_menu", "tap", 628, 18, 60, 44),
         ("upgrade_cost", "read", 340, 310, 120, 35),
         ("builder_count", "read", 10, 550, 35, 30),
         ("own_gems_number", "read", 1078, 195, 80, 30),

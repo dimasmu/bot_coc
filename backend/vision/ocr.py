@@ -295,6 +295,45 @@ def find_text(screenshot: bytes, keyword: str) -> tuple[int, int] | None:
         return None
 
 
+def find_texts(screenshot: bytes, region: tuple[int, int, int, int] | None = None,
+               min_conf: float = 0.3) -> list[tuple[str, int, int, float]]:
+    """Return all OCR text boxes as (text, cx, cy, conf) in one pass.
+
+    Args:
+        screenshot: PNG bytes from adb screencap
+        region: optional (x1, y1, x2, y2) — only boxes whose center is inside
+        min_conf: minimum OCR confidence to include
+
+    Returns:
+        List of (text, center_x, center_y, confidence), in OCR order.
+    """
+    try:
+        nparr = np.frombuffer(screenshot, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return []
+
+        reader = _get_reader()
+        results = reader.readtext(img, detail=1, paragraph=False)
+        out = []
+        for bbox, text, conf in results:
+            if conf < min_conf:
+                continue
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            cx = int(sum(xs) / len(xs))
+            cy = int(sum(ys) / len(ys))
+            if region is not None:
+                x1, y1, x2, y2 = region
+                if not (x1 <= cx <= x2 and y1 <= cy <= y2):
+                    continue
+            out.append((text, cx, cy, float(conf)))
+        return out
+    except Exception as e:
+        logger.error("find_texts failed: %s", e)
+        return []
+
+
 def _check_badge_texture(screenshot: bytes, card_x: int, card_top: int) -> float:
     """Return white pixel percentage in the badge region after OTSU threshold.
 
