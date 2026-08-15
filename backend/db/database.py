@@ -1,8 +1,11 @@
 """SQLite database engine and session management."""
 
+import logging
 from sqlmodel import create_engine, SQLModel, Session
 from sqlalchemy import text
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_engine(
     f"sqlite:///{settings.db_path}",
@@ -83,6 +86,40 @@ def init_db():
         ("upgrade_check", 0, None, None, None),
         ("upgrade_execute", 1, None, None, None),
     ]
+
+    # ── DB Version Migration ───────────────────────────────────────
+    # V1→V3: Attack farming loop replaced with idle wait (debugging)
+    # V4: Restore the full attack farming cycle
+    with Session(engine) as session:
+        from sqlmodel import select
+        db_ver = session.exec(select(Config).where(
+            Config.key == "db_version")).first()
+        current_ver = int(db_ver.value) if db_ver else 0
+
+        if current_ver < 4:
+            seq = session.exec(select(BotSequence).where(
+                BotSequence.name == "Farming Loop")).first()
+            if seq:
+                old_steps = session.exec(select(SequenceStep).where(
+                    SequenceStep.sequence_id == seq.id)).all()
+                for s in old_steps:
+                    session.delete(s)
+                session.flush()
+                for stype, order, roi, dur, cfg in farming_steps:
+                    session.add(SequenceStep(
+                        sequence_id=seq.id, step_order=order,
+                        step_type=stype, roi_name=roi,
+                        duration=dur, config_json=cfg,
+                    ))
+                logger.info("DB migration applied: farming attack steps restored (V%d→V4)",
+                            current_ver)
+
+            if db_ver:
+                db_ver.value = "4"
+            else:
+                session.add(Config(key="db_version", value="4", category="SYSTEM"))
+            session.commit()
+    # ── End DB Version Migration ───────────────────────────────────
 
     with Session(engine) as session:
         # --- Farming Loop ---
