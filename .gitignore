@@ -10,3 +10,7 @@ storage/coc_bot.db
 storage/templates/*.png
 node_modules/
 .superpowers/
+
+# ADB private keys — never commit
+storage/adbkey
+storage/adbkey.pub
