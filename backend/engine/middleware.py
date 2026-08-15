@@ -158,6 +158,26 @@ def _find_close_x_button(hsv: np.ndarray) -> tuple[int, int] | None:
     return None
 
 
+def _modal_is_open(image: np.ndarray) -> bool:
+    """Detect an open modal/panel via the dark semi-transparent dim overlay.
+
+    When a modal is open the game dims everything outside the panel, so
+    the screen edge strips become much darker than the panel interior.
+    The panel-vs-edge contrast works regardless of the village day/night
+    cycle. Validated on real screenshots: open modal 123-133, clean home
+    (day and night) <= 49.
+    """
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    v = hsv[:, :, 2].astype(np.float64)
+
+    panel = v[200:400, 400:850].mean()
+    edge_l = v[250:450, 0:100].mean()
+    edge_r = v[250:450, 1200:1280].mean()
+    # min() of the two edges so a passing cloud shadow on one side
+    # doesn't fake the contrast.
+    return bool(panel - min(edge_l, edge_r) > 100)
+
+
 def find_shop_arrow_cv(image: np.ndarray) -> tuple[int, int] | None:
     """Find the orange arrow indicator on the highlighted Shop card.
 
