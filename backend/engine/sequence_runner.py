@@ -1263,7 +1263,9 @@ class SequenceRunner:
 
         suggested_pos = find_text(screen, "Suggested")
         if not suggested_pos:
-            logger.info("No 'Suggested upgrades:' in lab panel — lab busy or none available")
+            logger.info("No 'Suggested upgrades:' in lab panel — closing panel")
+            await self._tap_close_universal(adb)
+            await human_delay(0.5, 1.0)
             self._upgrade_target = None
             return
 
