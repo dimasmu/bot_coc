@@ -940,19 +940,23 @@ class SequenceRunner:
         else:
             logger.warning("btn_close_universal ROI not calibrated")
 
-    async def _close_panel_until_gone(self, adb, max_attempts: int = 4) -> bool:
-        """Tap close repeatedly until no close button is detectable.
+    async def _close_panel_until_gone(self, adb, max_attempts: int = 6) -> bool:
+        """Tap close repeatedly until no modal/panel dim overlay is detected.
 
-        Each attempt detects the red X close button dynamically (HSV, via
-        the middleware detector) and taps it; when no X is found the panel
-        is assumed gone. The calibrated btn_close_universal ROI is used as
-        a one-shot fallback on the first attempt — modals' X positions vary
-        and the fixed ROI can miss (e.g. the lab confirm modal's X sits at
-        ~(1131, 56) while the ROI taps at ~(1229, 53)).
+        Each attempt first checks the dark dim overlay (middleware
+        _modal_is_open) — the generic "a modal is open" signal that works
+        regardless of which panel it is or where its X sits. Close
+        candidates, in order:
 
-        Returns True if the panel was closed (or no panel was detected).
+        1. dynamic red X (confirm modal, found at ~(1131, 56)),
+        2. calibrated btn_close_universal ROI (research panel),
+        3. a tap on the dimmed strip outside the panel ((30, 400) —
+           the game dismisses modals on outside taps; only fired while
+           a modal is confirmed open, so it can't hit home-screen UI).
+
+        Returns True if the screen is clean (no dim overlay).
         """
-        from backend.engine.middleware import _find_close_x_button
+        from backend.engine.middleware import _find_close_x_button, _modal_is_open
 
         for attempt in range(max_attempts):
             screen = await adb.screencap()
@@ -964,6 +968,10 @@ class SequenceRunner:
             if img is None:
                 return False
 
+            if not _modal_is_open(img):
+                logger.info("Panel closed — no dim overlay detected")
+                return True
+
             pos = _find_close_x_button(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
             if pos:
                 logger.info("Closing panel: red X found at (%d,%d)", pos[0], pos[1])
@@ -971,23 +979,22 @@ class SequenceRunner:
                 await human_delay(0.5, 1.0)
                 continue
 
-            if attempt == 0:
-                # No dynamic X — try the calibrated close ROI once.
-                with get_session() as session:
-                    close_roi = session.query(RoiTemplate).filter_by(
-                        roi_name="btn_close_universal").first()
-                if close_roi:
-                    cx = close_roi.x_pos + close_roi.width // 2
-                    cy = close_roi.y_pos + close_roi.height // 2
-                    logger.info("Closing panel: fallback tap at (%d,%d)", cx, cy)
-                    await human_tap(adb, cx, cy, sigma=5)
-                    await human_delay(0.5, 1.0)
-                    continue
+            with get_session() as session:
+                close_roi = session.query(RoiTemplate).filter_by(
+                    roi_name="btn_close_universal").first()
+            if close_roi:
+                cx = close_roi.x_pos + close_roi.width // 2
+                cy = close_roi.y_pos + close_roi.height // 2
+                logger.info("Closing panel: btn_close_universal at (%d,%d)", cx, cy)
+                await human_tap(adb, cx, cy, sigma=5)
+                await human_delay(0.5, 1.0)
+                continue
 
-            logger.info("Panel closed — no close button detected")
-            return True
+            logger.info("Closing panel: tapping dimmed strip at (30, 400)")
+            await human_tap(adb, 30, 400, sigma=3)
+            await human_delay(0.5, 1.0)
 
-        logger.warning("Panel still detected after %d close attempts", max_attempts)
+        logger.warning("Panel still open after %d close attempts", max_attempts)
         return False
 
     def _save_lab_confirm_debug(self, screen):

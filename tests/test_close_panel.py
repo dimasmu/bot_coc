@@ -31,6 +31,9 @@ class _FakeRoi:
 
 
 class _FakeSession:
+    def __init__(self, roi=_FakeRoi()):
+        self._roi = roi  # pass False for "ROI not calibrated"
+
     def __enter__(self):
         return self
 
@@ -44,7 +47,7 @@ class _FakeSession:
         return self
 
     def first(self):
-        return _FakeRoi()
+        return self._roi
 
 
 @pytest.fixture
@@ -62,12 +65,13 @@ async def test_close_panel_taps_x_until_gone(runner, monkeypatch):
     async def fake_delay(*args, **kwargs):
         pass
 
-    def fake_find_x(hsv):
-        return (1131, 56) if len(taps) < 2 else None
+    def fake_modal_open(img):
+        return len(taps) < 2  # open until two close taps land
 
     monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
     monkeypatch.setattr(seq_mod, "human_delay", fake_delay)
-    monkeypatch.setattr(mw_mod, "_find_close_x_button", fake_find_x)
+    monkeypatch.setattr(mw_mod, "_modal_is_open", fake_modal_open)
+    monkeypatch.setattr(mw_mod, "_find_close_x_button", lambda hsv: (1131, 56))
 
     result = await runner._close_panel_until_gone(
         _FakeAdb([_png_bytes()] * 4))
@@ -76,7 +80,7 @@ async def test_close_panel_taps_x_until_gone(runner, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_close_panel_falls_back_to_calibrated_roi_once(runner, monkeypatch):
+async def test_close_panel_uses_roi_when_no_x(runner, monkeypatch):
     taps = []
 
     async def fake_tap(adb, x, y, sigma=0):
@@ -85,14 +89,59 @@ async def test_close_panel_falls_back_to_calibrated_roi_once(runner, monkeypatch
     async def fake_delay(*args, **kwargs):
         pass
 
+    def fake_modal_open(img):
+        return len(taps) < 1
+
     monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
     monkeypatch.setattr(seq_mod, "human_delay", fake_delay)
+    monkeypatch.setattr(mw_mod, "_modal_is_open", fake_modal_open)
     monkeypatch.setattr(mw_mod, "_find_close_x_button", lambda hsv: None)
     monkeypatch.setattr(seq_mod, "get_session", lambda: _FakeSession())
 
-    result = await runner._close_panel_until_gone(_FakeAdb([_png_bytes()] * 2))
+    result = await runner._close_panel_until_gone(
+        _FakeAdb([_png_bytes()] * 3))
     assert result is True
     assert taps == [(1229, 53)]  # btn_close_universal ROI center
+
+
+@pytest.mark.asyncio
+async def test_close_panel_taps_dim_strip_without_roi(runner, monkeypatch):
+    taps = []
+
+    async def fake_tap(adb, x, y, sigma=0):
+        taps.append((x, y))
+
+    async def fake_delay(*args, **kwargs):
+        pass
+
+    def fake_modal_open(img):
+        return len(taps) < 1
+
+    monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
+    monkeypatch.setattr(seq_mod, "human_delay", fake_delay)
+    monkeypatch.setattr(mw_mod, "_modal_is_open", fake_modal_open)
+    monkeypatch.setattr(mw_mod, "_find_close_x_button", lambda hsv: None)
+    monkeypatch.setattr(seq_mod, "get_session", lambda: _FakeSession(False))
+
+    result = await runner._close_panel_until_gone(
+        _FakeAdb([_png_bytes()] * 3))
+    assert result is True
+    assert taps == [(30, 400)]  # dimmed strip outside the panel
+
+
+@pytest.mark.asyncio
+async def test_close_panel_clean_screen_no_taps(runner, monkeypatch):
+    taps = []
+
+    async def fake_tap(adb, x, y, sigma=0):
+        taps.append((x, y))
+
+    monkeypatch.setattr(seq_mod, "human_tap", fake_tap)
+    monkeypatch.setattr(mw_mod, "_modal_is_open", lambda img: False)
+
+    result = await runner._close_panel_until_gone(_FakeAdb([_png_bytes()]))
+    assert result is True
+    assert taps == []
 
 
 @pytest.mark.asyncio
