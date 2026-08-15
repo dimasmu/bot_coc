@@ -39,6 +39,28 @@ def match_template(image: np.ndarray, template_path: str, threshold: float = 0.7
     
     return None
 
+def _confirm_cost_is_red(image: np.ndarray,
+                         box: Tuple[int, int, int, int]) -> bool:
+    """True if the confirm button at `box` contains red cost digits.
+
+    Red digits on the confirm button mean insufficient resources — the
+    button body stays green but the game renders the cost in red.
+    """
+    x, y, bw, bh = box
+    x1 = max(0, x)
+    y1 = max(0, y)
+    x2 = min(image.shape[1], x + bw)
+    y2 = min(image.shape[0], y + bh)
+    if x2 <= x1 or y2 <= y1:
+        return False
+
+    hsv = cv2.cvtColor(image[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
+    red = ((hsv[:, :, 0] < 12) | (hsv[:, :, 0] > 168)) & \
+          (hsv[:, :, 1] > 90) & (hsv[:, :, 2] > 90)
+    area = (x2 - x1) * (y2 - y1)
+    return int(red.sum()) > area * 0.03
+
+
 def analyze_confirm_button(image):
     """Menganalisis status tombol CONFIRM pada modal Upgrade.
 
@@ -66,6 +88,7 @@ def analyze_confirm_button(image):
 
     best_score = 0
     best_pos = None
+    best_tw = best_th = 0
     for template_path in confirm_templates:
         tpl = cv2.imread(template_path)
         if tpl is None:
@@ -82,6 +105,7 @@ def analyze_confirm_button(image):
         if max_val > best_score:
             best_score = max_val
             best_pos = pos
+            best_tw, best_th = tw, th
 
     if best_score >= 0.50:
         # Sanity check: genuine confirm buttons are never in the left 30%.
@@ -89,6 +113,12 @@ def analyze_confirm_button(image):
         # match at x < 300 with similar scores to real confirm buttons (0.50-0.53).
         if best_pos[0] < w * 0.3:
             print(f"[CV CHECK] Template match rejected — X={best_pos[0]} < {int(w*0.3)} (false positive)")
+        elif _confirm_cost_is_red(
+                image, (best_pos[0] - best_tw // 2, best_pos[1] - best_th // 2,
+                        best_tw, best_th)):
+            print(f"[CV CHECK] Template match at {best_pos} has red cost digits "
+                  f"-> INSUFFICIENT_RESOURCES")
+            return ("INSUFFICIENT_RESOURCES", None)
         else:
             print(f"[CV CHECK] Template match: score={best_score:.4f} at {best_pos} -> READY")
             return ("READY", best_pos)
